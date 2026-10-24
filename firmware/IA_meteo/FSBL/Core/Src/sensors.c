@@ -160,6 +160,23 @@ void sensors_i2c_scan(I2C_HandleTypeDef *hi2c)
     }
   }
   printf("  %d peripherique(s) trouve(s)\r\n", found);
+
+  if (found == 0)
+  {
+    /* Diagnostic : au repos, un bus I2C doit être à l'état haut (pull-ups).
+     * Une ligne à 0 = pas de pull-up, carte mal enfichée ou court-circuit. */
+    int sda = (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1) == GPIO_PIN_SET);
+    int scl = (HAL_GPIO_ReadPin(GPIOH, GPIO_PIN_9) == GPIO_PIN_SET);
+    printf("  Diagnostic : SDA (PC1) = %d, SCL (PH9) = %d  (attendu : 1 et 1)\r\n", sda, scl);
+    if (!sda || !scl)
+    {
+      printf("  -> ligne a 0 : verifier les pull-ups (GPIO_PULLUP) et la carte capteurs\r\n");
+    }
+    else
+    {
+      printf("  -> lignes OK : verifier que la carte capteurs est bien enfichee\r\n");
+    }
+  }
 }
 
 /* ------------------------------------------------------------------------- */
