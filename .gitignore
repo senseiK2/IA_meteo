@@ -1,0 +1,42 @@
+# ===== STM32CubeIDE / CubeMX =====
+# Dossiers de build
+Debug/
+Release/
+**/Debug/
+**/Release/
+build/
+
+# Binaires et fichiers de compilation
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# Métadonnées Eclipse propres à la machine
+.metadata/
+**/.settings/language.settings.xml
+*.launch.bak
+RemoteSystemsTempFiles/
+
+# NE PAS ignorer : .ioc, .project, .cproject, *.ld (nécessaires pour rouvrir le projet)
+
+# ===== Python / ML (TP3) =====
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+*.h5.tmp
+
+# Données volumineuses (à documenter dans le README plutôt que versionner)
+ml/data/raw/
+
+# ===== Divers =====
+.DS_Store
+Thumbs.db
+*.log
