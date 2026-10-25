@@ -63,10 +63,10 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+#if (TP_PARTIE == 1)
 static const led_id_t s_sequence[] = { LED_ID_RED, LED_ID_GREEN, LED_ID_BLUE };
 #define SEQUENCE_LEN  (sizeof(s_sequence) / sizeof(s_sequence[0]))
-
-#if (TP_PARTIE == 2)
+#else
 static sensors_data_t s_data;
 #endif
 /* USER CODE END PV */
