@@ -9,10 +9,10 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 | Élément | Détail |
 |---|---|
 | Carte MCU | NUCLEO-N657X0-Q (STM32N657X0H3Q, Cortex-M55, 4,2 Mo SRAM, pas de Flash interne) |
-| Carte capteurs | X-NUCLEO-IKS01A3 (HTS221, LPS22HH, STTS751, LSM6DSO, LIS2MDL, LIS2DW12) |
+| Carte capteurs | X-NUCLEO-IKS4A1 (SHT40, LPS22DF, STTS22H…) ou X-NUCLEO-IKS01A3 (HTS221, LPS22HH, STTS751…), détectée automatiquement |
 | Console | USART1 via ST-LINK VCP (PE5 TX / PE6 RX), 115200 8N1 |
 | Bus capteurs | I2C1 sur connecteur Arduino : PH9 (SCL) / PC1 (SDA) |
-| Adresses I²C (7 bits) | HTS221 0x5F, LPS22HH 0x5D, STTS751 0x48–0x4B (détectée au démarrage) |
+| Adresses I²C (7 bits) | IKS4A1 : SHT40 0x44, LPS22DF 0x5D (ID 0xB4), STTS22H 0x38 — IKS01A3 : HTS221 0x5F, LPS22HH 0x5D (ID 0xB3), STTS751 0x4A |
 | LEDs | Rouge PG10, Verte PG0, Bleue PG8 (actives à l'état bas) |
 
 ## Structure du dépôt
