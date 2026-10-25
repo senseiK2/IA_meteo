@@ -31,17 +31,36 @@ def chercher_stations(lat, lon):
         print(stations)
 
 
+def telecharger_une_annee(ms, station, annee, debut, fin):
+    """Télécharge une seule année (bornée par debut / fin)."""
+    d = max(debut, datetime(annee, 1, 1))
+    f = min(fin, datetime(annee, 12, 31, 23, 59))
+    if hasattr(ms, "hourly"):                # Meteostat 2.x
+        return ms.hourly(station, d, f).fetch()
+    return ms.Hourly(station, d, f).fetch()  # Meteostat 1.x
+
+
 def telecharger(station, debut, fin):
-    """Renvoie un DataFrame horaire indexé par le temps (UTC)."""
+    """Renvoie un DataFrame horaire indexé par le temps (UTC).
+
+    Meteostat 2.x refuse les demandes de plus de 3 ans d'un coup (pour
+    ménager ses serveurs). On télécharge donc ANNÉE PAR ANNÉE, puis on
+    recolle les morceaux avec pd.concat.
+    """
+    import meteostat as ms
     debut = datetime.fromisoformat(debut)
     fin = datetime.fromisoformat(fin).replace(hour=23, minute=59)
-    import meteostat as ms
-    if hasattr(ms, "hourly"):                # Meteostat 2.x
-        df = ms.hourly(station, debut, fin).fetch()
-    else:                                    # Meteostat 1.x
-        df = ms.Hourly(station, debut, fin).fetch()
-    if df is None or df.empty:
+
+    morceaux = []
+    for annee in range(debut.year, fin.year + 1):
+        df_annee = telecharger_une_annee(ms, station, annee, debut, fin)
+        n = 0 if df_annee is None else len(df_annee)
+        print(f"  {annee} : {n} heures")
+        if n:
+            morceaux.append(df_annee)
+    if not morceaux:
         raise SystemExit(f"Aucune donnée pour la station {station}.")
+    df = pd.concat(morceaux)
     if isinstance(df.index, pd.MultiIndex):  # (station, time) -> time
         df = df.droplevel([n for n in df.index.names if n != "time"])
     df.index.name = "time"
