@@ -33,6 +33,7 @@
 #include "netif/etharp.h"
 #include "ethernetif.h"
 #include "lan8742.h"
+#include "console.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -152,8 +153,10 @@ static void low_level_init(struct netif *netif)
 
   if (heth1.Init.RxBuffLen != ETH_RX_BUFFER_SIZE)
   {
+    console_lock();
     printf("  [ETH] ERREUR : RxBuffLen = %lu, ethernetif attend %lu\r\n",
            (unsigned long)heth1.Init.RxBuffLen, (unsigned long)ETH_RX_BUFFER_SIZE);
+    console_unlock();
   }
 
   LWIP_MEMPOOL_INIT(RX_POOL);
@@ -174,13 +177,17 @@ static void low_level_init(struct netif *netif)
   LAN8742_RegisterBusIO(&LAN8742, &LAN8742_IOCtx);
   if (LAN8742_Init(&LAN8742) != LAN8742_STATUS_OK)
   {
+    console_lock();
     printf("  [ETH] ERREUR : PHY LAN8742 introuvable (verifier MDIO=PF4 / MDC=PG11)\r\n");
+    console_unlock();
     netif_set_link_down(netif);
     netif_set_down(netif);
     return;
   }
   s_phy_ok = 1;
+  console_lock();
   printf("  [ETH] PHY LAN8742 detecte (adresse MDIO %lu)\r\n", (unsigned long)LAN8742.DevAddr);
+  console_unlock();
 }
 
 /**
