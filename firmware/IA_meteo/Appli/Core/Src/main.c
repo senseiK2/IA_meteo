@@ -51,7 +51,7 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-
+extern TIM_HandleTypeDef htim6;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -97,7 +97,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  __HAL_TIM_SET_PRESCALER(&htim6, (HAL_RCCEx_GetTIMGFreq() / 1000000U) - 1U);
   /* USER CODE END Init */
 
   /* USER CODE BEGIN SysInit */
