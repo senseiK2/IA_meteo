@@ -30,6 +30,7 @@
 #include "led.h"
 #include "sensors.h"
 #include "app_ethernet.h"
+#include "net_ping.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,9 @@
 #define SENSOR_PERIOD_MS   5000U   /* une lecture des capteurs toutes les 5 s   */
 #define LED_BUSY_MIN_MS    300U    /* LED rouge allumée au moins 300 ms (visible) */
 #define LED_BLINK_MS       500U    /* demi-période du clignotement de la LED verte */
+#define PING_HOTE          "google.com"
+#define PING_PERIOD_MS     10000U  /* un ping toutes les 10 s                    */
+#define PING_TIMEOUT_MS    2000U   /* attente maximum de la réponse              */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -239,8 +243,8 @@ void TacheLed(void *argument)
 
 /**
   * @brief  Tâche réseau (TP2 partie 3).
-  *         Déjà fait : démarrage de LwIP, DHCP, affichage de l'adresse IP.
-  *         À toi de compléter la boucle : ping google.com + LED bleue.
+  *         Démarre LwIP, attend l'IP du DHCP, puis ping google.com toutes les
+  *         10 s. LED bleue = communication réseau en cours.
   */
 void TacheReseau(void *argument)
 {
@@ -250,18 +254,37 @@ void TacheReseau(void *argument)
 
   if (!reseau_attendre_ip(30000))      /* 30 s pour que la box donne une IP */
   {
-    printf("  [NET] Pas d'IP : la tache reseau continue d'attendre\r\n");
+    printf("  [NET] Pas d'IP pour l'instant, on reessaiera\r\n");
   }
 
   for (;;)
   {
-    /* TODO (exercice) :
-     *  1. log_etat("Communication Reseau");
-     *  2. allumer la LED bleue pendant l'échange réseau
-     *  3. résoudre "google.com" (DNS) puis envoyer un ping (ICMP)
-     *  4. éteindre la LED bleue, afficher le résultat
-     * Pour l'instant, la carte répond déjà aux pings envoyés depuis ton PC. */
-    osDelay(10000);
+    if (reseau_est_pret())
+    {
+      char ip[16] = "?";
+      uint32_t rtt = 0;
+
+      led_on(LED_ID_BLUE);                         /* BLEU : communication réseau */
+      log_etat("Communication Reseau");
+
+      ping_resultat_t r = net_ping(PING_HOTE, PING_TIMEOUT_MS, ip, &rtt);
+
+      if (r == PING_OK)
+      {
+        printf("  ping %s (%s) : reponse en %lu ms\r\n", PING_HOTE, ip, (unsigned long)rtt);
+      }
+      else
+      {
+        printf("  ping %s (%s) : %s\r\n", PING_HOTE, ip, net_ping_texte(r));
+      }
+      led_off(LED_ID_BLUE);
+    }
+    else
+    {
+      printf("  [NET] reseau pas pret (cable ? DHCP ?)\r\n");
+    }
+
+    osDelay(PING_PERIOD_MS);
   }
 }
 
