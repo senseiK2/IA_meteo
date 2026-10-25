@@ -2,8 +2,8 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : TP2 - Partie 1 : LEDs, chenillard 3 s, logs console
-  *                   NUCLEO-N657X0-Q (projet FSBL)
+  * @brief          : FSBL (premier programme lancé par la boot ROM).
+  *                   L'application est dans le projet Appli.
   ******************************************************************************
   * @attention
   *
@@ -22,9 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-#include "led.h"
-#include "sensors.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,21 +32,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Choix de la démo : 1 = chenillard (partie 1), 2 = capteurs (partie 2) */
-#define TP_PARTIE             2
 
-/* Tant que I2C1 n'est pas activé dans CubeMX, on reste sur la partie 1 */
-#if (TP_PARTIE == 2) && !defined(HAL_I2C_MODULE_ENABLED)
-#warning "I2C1 non active dans le .ioc : demo de la partie 1"
-#undef  TP_PARTIE
-#define TP_PARTIE             1
-#endif
-
-#define CHENILLARD_DELAY_MS   1000U   /* le sujet impose 3 s (3000U) */
-#define SENSOR_PERIOD_MS      5000U   /* partie 2 : une lecture toutes les 5 s */
-#define LED_BUSY_MIN_MS       300U    /* durée mini de la LED rouge, pour qu'elle
-                                         soit visible (une lecture I2C dure
-                                         quelques ms seulement) */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,12 +47,7 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-#if (TP_PARTIE == 1)
-static const led_id_t s_sequence[] = { LED_ID_RED, LED_ID_GREEN, LED_ID_BLUE };
-#define SEQUENCE_LEN  (sizeof(s_sequence) / sizeof(s_sequence[0]))
-#else
-static sensors_data_t s_data;
-#endif
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,25 +56,11 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-static void log_state(const char *state);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-/* Redirection de printf vers l'USART1 (Virtual COM Port du ST-LINK).
- * syscalls.c (généré par CubeIDE) appelle __io_putchar pour chaque caractère. */
-int __io_putchar(int ch)
-{
-  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
-  return ch;
-}
-
-/* Log horodaté : "[    3012 ms] <ROUGE>" */
-static void log_state(const char *state)
-{
-  printf("[%8lu ms] <%s>\r\n", (unsigned long)HAL_GetTick(), state);
-}
 
 /* USER CODE END 0 */
 
@@ -130,30 +95,6 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
-  /* printf sans buffer : chaque caractère part immédiatement sur l'UART */
-  setvbuf(stdout, NULL, _IONBF, 0);
-
-  log_state("debut d'application");
-
-#if (TP_PARTIE == 1)
-  /* 1.a : allumer les trois LEDs pendant 3 s */
-  led_all_on();
-  log_state("TOUTES LES LEDS ALLUMEES");
-  HAL_Delay(CHENILLARD_DELAY_MS);
-  led_all_off();
-#else
-  /* LED rouge = occupé pendant l'initialisation */
-  led_only(LED_ID_RED);
-  log_state("scan du bus I2C");
-  sensors_i2c_scan(&hi2c1);
-
-  log_state("initialisation des capteurs");
-  int nb = sensors_init(&hi2c1);
-  printf("  %d/3 capteurs prets\r\n", nb);
-
-  /* LED verte = disponible */
-  led_only(LED_ID_GREEN);
-#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -163,32 +104,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-#if (TP_PARTIE == 1)
-    /* 1.b + 1.c : chenillard ROUGE -> VERT -> BLEU avec logs */
-    log_state("debut de chenillard");
-    for (uint32_t i = 0; i < SEQUENCE_LEN; i++)
-    {
-      led_only(s_sequence[i]);
-      log_state(led_name(s_sequence[i]));
-      HAL_Delay(CHENILLARD_DELAY_MS);
-    }
-#else
-    /* ROUGE : occupé, lecture des capteurs */
-    uint32_t t_start = HAL_GetTick();
-    led_only(LED_ID_RED);
-    log_state("lecture capteurs");
-    sensors_read(&s_data);
-    sensors_print(&s_data);
-    while ((HAL_GetTick() - t_start) < LED_BUSY_MIN_MS)
-    {
-    }
-
-    /* VERT : disponible, en attente de la prochaine lecture */
-    led_only(LED_ID_GREEN);
-    log_state("attente");
-    HAL_Delay(SENSOR_PERIOD_MS);
-#endif
   }
   /* USER CODE END 3 */
 }

@@ -20,7 +20,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 ```
 .
 ├── firmware/
-│   └── IA_meteo/        # Projet STM32CubeIDE (FSBL + Appli)
+│   └── IA_meteo/        # Projet STM32CubeIDE : FSBL (démarrage) + Appli (application)
 ├── ml/                  # TP3 : données, notebooks, modèles
 ├── docs/                # Captures de logs, schémas, notes pour l'oral
 └── README.md
@@ -29,7 +29,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 ## Avancement
 
 - [x] TP2.1 – LEDs, chenillard 3 s, logs console
-- [ ] TP2.2 – Lecture capteurs I²C (HTS221, LPS22HH, STTS751) + LEDs d'état
+- [x] TP2.2 – Lecture capteurs I²C (SHT40, LPS22DF, STTS22H sur IKS4A1) + LEDs d'état
 - [ ] TP2.3 – FreeRTOS + LwIP (DHCP, ICMP, sockets BSD), ping, LED bleue
 - [ ] TP3 – Modèle de prédiction météo
 - [ ] Intégration de l'inférence sur le NPU
@@ -37,7 +37,11 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 ## Lancer le firmware
 
 1. Placer la carte en **mode développement** (BOOT0 = 0, BOOT1 = 1), puis la réalimenter.
-2. Ouvrir le projet dans STM32CubeIDE et lancer **Debug** sur le projet FSBL.
+2. Ouvrir le projet dans STM32CubeIDE et lancer **Debug** sur le projet **IA_meteo_Appli**.
 3. Ouvrir un terminal série sur le port ST-LINK VCP à 115200 bauds.
+
+Tout le code applicatif est dans `Appli/Core` : le FSBL est limité à 255 Ko de code
+et 256 Ko de RAM, Appli dispose de 2 Mo de RAM (nécessaire pour FreeRTOS, LwIP et
+le modèle d'IA). En mode développement, le débogueur charge Appli directement en RAM.
 
 > En mode développement, le programme est chargé en RAM : il est perdu à la coupure d'alimentation.
