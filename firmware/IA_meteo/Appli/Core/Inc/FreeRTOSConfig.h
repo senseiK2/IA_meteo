@@ -169,7 +169,11 @@ standard names. */
 #define USE_CUSTOM_SYSTICK_HANDLER_IMPLEMENTATION 1
 
 /* USER CODE BEGIN Defines */
-/* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
+/* Projet FullSecure : FreeRTOS et toutes les tâches tournent en Secure.
+ * Avec 0, la première tâche est lancée en Non-Secure -> saut en 0x0 -> HardFault.
+ * (X-CUBE-FREERTOS 1.3.1 génère 0 malgré l'option "TZ Secure Only".) */
+#undef  configRUN_FREERTOS_SECURE_ONLY
+#define configRUN_FREERTOS_SECURE_ONLY   1
 /* USER CODE END Defines */
 
 #endif /* __FREERTOS_CONFIG_H */
