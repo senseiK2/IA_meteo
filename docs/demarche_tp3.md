@@ -110,3 +110,55 @@ coordonnées proches.
 
 Quatre jeux d'entrées sont comparés : mesures seules, + point de rosée,
 + heure et saison, + tendance de pression.
+
+---
+
+## 4. Premier entraînement (3 classes, réseau S, entrées « temps »)
+
+Réseau : 8 entrées → 16 → 16 → 3 sorties, **467 paramètres** (≈ 470 octets
+en int8). 53 530 heures d'entraînement (2015–2023), 8 784 de validation
+(2024), 8 760 de test (2025). Arrêt précoce à l'époque 23 ; poids restaurés
+à l'époque 11 (meilleure perte de validation).
+
+### Résultats sur l'année de test (2025)
+
+| Indicateur | Valeur |
+|---|---|
+| Accuracy | 61,1 % |
+| Accuracy équilibrée | 74,5 % |
+| Référence « toujours Nuageux » (accuracy) | 70,5 % |
+| Référence « toujours Nuageux » (accuracy équilibrée) | 33,3 % |
+
+| Classe réelle | Rappel | Prédite Clair | Prédite Nuageux | Prédite Précip. |
+|---|---|---|---|---|
+| Clair (1 227 h) | **90,5 %** | 0,91 | 0,05 | 0,04 |
+| Nuageux (6 178 h) | **50,7 %** | 0,20 | 0,51 | 0,29 |
+| Précipitations (1 355 h) | **82,2 %** | 0,05 | 0,13 | 0,82 |
+
+Précision estimée à partir de la matrice (part des prédictions correctes) :
+Clair ≈ 46 %, Nuageux ≈ 93 %, Précipitations ≈ 38 %.
+
+### Analyse
+
+- Le modèle a appris une relation réelle : il reconnaît 9 heures claires sur
+  10 et 8 heures de précipitations sur 10, là où la référence n'en reconnaît
+  aucune.
+- Son accuracy brute (61 %) est inférieure à la référence (70,5 %). C'est un
+  effet des **poids de classes** : le modèle est poussé à détecter les classes
+  rares, au prix de nombreuses erreurs sur « Nuageux ». Il en résulte beaucoup
+  de **fausses alertes** : seule une prédiction « Précipitations » sur trois
+  environ est correcte.
+- La confusion principale est Nuageux ↔ Précipitations : un ciel couvert et une
+  pluie faible présentent des valeurs d'humidité et de pression voisines.
+- Courbes : la perte de validation se stabilise dès l'époque 5 environ, et le
+  réseau n'a que 467 paramètres pour 53 000 exemples. Il n'y a donc pas de
+  sur-apprentissage marqué. L'écart entre les courbes train et validation
+  s'explique en partie par la méthode : la perte d'entraînement est pondérée
+  par les poids de classes, celle de validation ne l'est pas, et la
+  répartition des classes varie d'une année à l'autre.
+
+### Pistes
+
+Atténuer les poids de classes, ajouter la tendance de pression (dp3h), séparer
+le brouillard (4 classes), faire varier la taille du réseau : ces pistes sont
+évaluées dans l'étude du compromis.
