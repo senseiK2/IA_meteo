@@ -29,62 +29,10 @@
 #include "main.h"
 #include "led.h"
 #include "sensors.h"
+#include "app_ethernet.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
-FreeMarker template error (DEBUG mode; use RETHROW in production!):
-The following has evaluated to null or missing:
-==> RTOS.tasks [in template "freertos_typedefs_cmsis_v2.ftl" at line 9, column 12]
-----
-Tip: It's the step after the last dot that caused this error, not those before it.
-----
-Tip: If the failing expression is known to legally refer to something that's sometimes null or missing, either specify a default value like myOptionalVar!myDefault, or use [#if myOptionalVar??]when-present[#else]when-missing[/#if]. (These only cover the last step of the expression; to cover the whole expression, use parenthesis: (myOptionalVar.foo)!myDefault, (myOptionalVar.foo)??
-----
-----
-FTL stack trace ("~" means nesting-related):
-- Failed at: #list RTOS.tasks as task [in template "freertos_typedefs_cmsis_v2.ftl" at line 9, column 5]
-----
-Java stack trace (for programmers):
-----
-freemarker.core.InvalidReferenceException: [... Exception message was already printed; see it above ...]
-at freemarker.core.InvalidReferenceException.getInstance(InvalidReferenceException.java:134)
-at freemarker.core.Expression.assertNonNull(Expression.java:249)
-at freemarker.core.IteratorBlock.acceptWithResult(IteratorBlock.java:104)
-at freemarker.core.IteratorBlock.accept(IteratorBlock.java:94)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.visit(Environment.java:376)
-at freemarker.core.Environment.visitAndTransform(Environment.java:501)
-at freemarker.core.CompressedBlock.accept(CompressedBlock.java:42)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.process(Environment.java:313)
-at freemarker.template.Template.process(Template.java:383)
-at com.st.microxplorer.codegenerator.CodeEngine.freemarkerDo(CodeEngine.java:420)
-at com.st.microxplorer.codegenerator.CodeEngine.genCode(CodeEngine.java:273)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateOutputCode(CodeGenerator.java:6459)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCode(CodeGenerator.java:5281)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCodeFile(CodeGenerator.java:1862)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCodeFiles(CodeGenerator.java:2188)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCode(CodeGenerator.java:1691)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.generateCode(ProjectBuilder.java:3343)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createCode(ProjectBuilder.java:2235)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:819)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:608)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager.startGenerateCode(MainProjectManager.java:1497)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager$3.onCommandEntered(MainProjectManager.java:283)
-at com.st.components.util.CommandLineManager$3.run(CommandLineManager.java:175)
-at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:308)
-at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
-at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
-at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
-at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
-at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
-at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
 /* USER CODE BEGIN PTD */
 
 /* USER CODE END PTD */
@@ -129,67 +77,32 @@ const osThreadAttr_t TacheLed_attributes = {
   .stack_size = 256 * 4
 };
 
+/* --- TacheReseau ------------------------------------------------------------
+ * Démarre LwIP, attend l'adresse IP du DHCP, puis (à compléter) ping et
+ * LED bleue. Pile 1024 mots = 4096 octets : printf + appels LwIP. */
+osThreadId_t TacheReseauHandle;
+const osThreadAttr_t TacheReseau_attributes = {
+  .name       = "TacheReseau",
+  .priority   = (osPriority_t) osPriorityNormal,
+  .stack_size = 1024 * 4
+};
+
 static sensors_data_t s_data;
 
 /* USER CODE END Variables */
-FreeMarker template error (DEBUG mode; use RETHROW in production!):
-The following has evaluated to null or missing:
-==> RTOS.tasks [in template "freertos_vars_cmsis_v2.ftl" at line 9, column 12]
-----
-Tip: It's the step after the last dot that caused this error, not those before it.
-----
-Tip: If the failing expression is known to legally refer to something that's sometimes null or missing, either specify a default value like myOptionalVar!myDefault, or use [#if myOptionalVar??]when-present[#else]when-missing[/#if]. (These only cover the last step of the expression; to cover the whole expression, use parenthesis: (myOptionalVar.foo)!myDefault, (myOptionalVar.foo)??
-----
-----
-FTL stack trace ("~" means nesting-related):
-- Failed at: #list RTOS.tasks as task [in template "freertos_vars_cmsis_v2.ftl" at line 9, column 5]
-----
-Java stack trace (for programmers):
-----
-freemarker.core.InvalidReferenceException: [... Exception message was already printed; see it above ...]
-at freemarker.core.InvalidReferenceException.getInstance(InvalidReferenceException.java:134)
-at freemarker.core.Expression.assertNonNull(Expression.java:249)
-at freemarker.core.IteratorBlock.acceptWithResult(IteratorBlock.java:104)
-at freemarker.core.IteratorBlock.accept(IteratorBlock.java:94)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.visit(Environment.java:376)
-at freemarker.core.Environment.visitAndTransform(Environment.java:501)
-at freemarker.core.CompressedBlock.accept(CompressedBlock.java:42)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.process(Environment.java:313)
-at freemarker.template.Template.process(Template.java:383)
-at com.st.microxplorer.codegenerator.CodeEngine.freemarkerDo(CodeEngine.java:420)
-at com.st.microxplorer.codegenerator.CodeEngine.genCode(CodeEngine.java:273)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateOutputCode(CodeGenerator.java:6459)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCode(CodeGenerator.java:5281)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCodeFile(CodeGenerator.java:1862)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCodeFiles(CodeGenerator.java:2188)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCode(CodeGenerator.java:1691)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.generateCode(ProjectBuilder.java:3343)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createCode(ProjectBuilder.java:2235)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:819)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:608)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager.startGenerateCode(MainProjectManager.java:1497)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager$3.onCommandEntered(MainProjectManager.java:283)
-at com.st.components.util.CommandLineManager$3.run(CommandLineManager.java:175)
-at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:308)
-at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
-at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
-at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
-at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
-at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
-at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+/* Definitions for defaultTask */
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 128 * 4
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 void TacheCapteurs(void *argument);
 void TacheLed(void *argument);
+void TacheReseau(void *argument);
 static void log_etat(const char *etat);
 /* USER CODE END FunctionPrototypes */
 
@@ -202,113 +115,65 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
-FreeMarker template error (DEBUG mode; use RETHROW in production!):
-The following has evaluated to null or missing:
-==> RTOS.mutexes [in template "freertos_init_c_cmsis_v2.ftl" at line 7, column 12]
-----
-Tip: It's the step after the last dot that caused this error, not those before it.
-----
-Tip: If the failing expression is known to legally refer to something that's sometimes null or missing, either specify a default value like myOptionalVar!myDefault, or use [#if myOptionalVar??]when-present[#else]when-missing[/#if]. (These only cover the last step of the expression; to cover the whole expression, use parenthesis: (myOptionalVar.foo)!myDefault, (myOptionalVar.foo)??
-----
-----
-FTL stack trace ("~" means nesting-related):
-- Failed at: #list RTOS.mutexes as mutex [in template "freertos_init_c_cmsis_v2.ftl" at line 7, column 5]
-----
-Java stack trace (for programmers):
-----
-freemarker.core.InvalidReferenceException: [... Exception message was already printed; see it above ...]
-at freemarker.core.InvalidReferenceException.getInstance(InvalidReferenceException.java:134)
-at freemarker.core.Expression.assertNonNull(Expression.java:249)
-at freemarker.core.IteratorBlock.acceptWithResult(IteratorBlock.java:104)
-at freemarker.core.IteratorBlock.accept(IteratorBlock.java:94)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.visit(Environment.java:376)
-at freemarker.core.Environment.visitAndTransform(Environment.java:501)
-at freemarker.core.CompressedBlock.accept(CompressedBlock.java:42)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.process(Environment.java:313)
-at freemarker.template.Template.process(Template.java:383)
-at com.st.microxplorer.codegenerator.CodeEngine.freemarkerDo(CodeEngine.java:420)
-at com.st.microxplorer.codegenerator.CodeEngine.genCode(CodeEngine.java:273)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateOutputCode(CodeGenerator.java:6459)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCode(CodeGenerator.java:5281)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCodeFile(CodeGenerator.java:1862)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCodeFiles(CodeGenerator.java:2188)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCode(CodeGenerator.java:1691)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.generateCode(ProjectBuilder.java:3343)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createCode(ProjectBuilder.java:2235)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:819)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:608)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager.startGenerateCode(MainProjectManager.java:1497)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager$3.onCommandEntered(MainProjectManager.java:283)
-at com.st.components.util.CommandLineManager$3.run(CommandLineManager.java:175)
-at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:308)
-at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
-at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
-at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
-at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
-at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
-at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+  /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* Les tâches sont seulement ENREGISTRÉES ici : elles ne démarreront
+   * qu'au moment de osKernelStart() dans main.c.
+   * osThreadNew renvoie NULL si le tas FreeRTOS (configTOTAL_HEAP_SIZE)
+   * est trop petit pour allouer la pile : on le vérifie. */
+  TacheCapteursHandle = osThreadNew(TacheCapteurs, NULL, &TacheCapteurs_attributes);
+  TacheLedHandle      = osThreadNew(TacheLed,      NULL, &TacheLed_attributes);
+  TacheReseauHandle   = osThreadNew(TacheReseau,   NULL, &TacheReseau_attributes);
+
+  if ((TacheCapteursHandle == NULL) || (TacheLedHandle == NULL) || (TacheReseauHandle == NULL))
+  {
+    printf("ERREUR : creation des taches impossible (tas FreeRTOS trop petit ?)\r\n");
+  }
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
 }
-FreeMarker template error (DEBUG mode; use RETHROW in production!):
-The following has evaluated to null or missing:
-==> RTOS.tasks [in template "freertos_body_user_threads_cmsis_v2.ftl" at line 7, column 12]
-----
-Tip: It's the step after the last dot that caused this error, not those before it.
-----
-Tip: If the failing expression is known to legally refer to something that's sometimes null or missing, either specify a default value like myOptionalVar!myDefault, or use [#if myOptionalVar??]when-present[#else]when-missing[/#if]. (These only cover the last step of the expression; to cover the whole expression, use parenthesis: (myOptionalVar.foo)!myDefault, (myOptionalVar.foo)??
-----
-----
-FTL stack trace ("~" means nesting-related):
-- Failed at: #list RTOS.tasks as task [in template "freertos_body_user_threads_cmsis_v2.ftl" at line 7, column 5]
-----
-Java stack trace (for programmers):
-----
-freemarker.core.InvalidReferenceException: [... Exception message was already printed; see it above ...]
-at freemarker.core.InvalidReferenceException.getInstance(InvalidReferenceException.java:134)
-at freemarker.core.Expression.assertNonNull(Expression.java:249)
-at freemarker.core.IteratorBlock.acceptWithResult(IteratorBlock.java:104)
-at freemarker.core.IteratorBlock.accept(IteratorBlock.java:94)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.visit(Environment.java:376)
-at freemarker.core.Environment.visitAndTransform(Environment.java:501)
-at freemarker.core.CompressedBlock.accept(CompressedBlock.java:42)
-at freemarker.core.Environment.visit(Environment.java:334)
-at freemarker.core.Environment.process(Environment.java:313)
-at freemarker.template.Template.process(Template.java:383)
-at com.st.microxplorer.codegenerator.CodeEngine.freemarkerDo(CodeEngine.java:420)
-at com.st.microxplorer.codegenerator.CodeEngine.genCode(CodeEngine.java:273)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateOutputCode(CodeGenerator.java:6459)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCode(CodeGenerator.java:5281)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateSpecificCodeFile(CodeGenerator.java:1862)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCodeFiles(CodeGenerator.java:2188)
-at com.st.microxplorer.codegenerator.CodeGenerator.generateCode(CodeGenerator.java:1691)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.generateCode(ProjectBuilder.java:3343)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createCode(ProjectBuilder.java:2235)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:819)
-at com.st.microxplorer.plugins.projectmanager.engine.ProjectBuilder.createProject(ProjectBuilder.java:608)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager.startGenerateCode(MainProjectManager.java:1497)
-at com.st.microxplorer.plugins.projectmanager.engine.MainProjectManager$3.onCommandEntered(MainProjectManager.java:283)
-at com.st.components.util.CommandLineManager$3.run(CommandLineManager.java:175)
-at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:308)
-at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
-at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
-at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
-at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
-at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
-at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+* @brief Function implementing the defaultTask thread.
+*        Réservée à la communication réseau (étape suivante).
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* USER CODE BEGIN defaultTask */
+  /* Pour l'instant elle ne fait rien : elle dort 1 s en boucle.
+   * (osDelay(1) généré par CubeMX la réveillait 1000 fois par seconde
+   *  pour rien.) */
+  for(;;)
+  {
+    osDelay(1000);
+  }
+  /* USER CODE END defaultTask */
+}
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
@@ -369,6 +234,34 @@ void TacheLed(void *argument)
   {
     led_toggle(LED_ID_GREEN);
     osDelay(LED_BLINK_MS);
+  }
+}
+
+/**
+  * @brief  Tâche réseau (TP2 partie 3).
+  *         Déjà fait : démarrage de LwIP, DHCP, affichage de l'adresse IP.
+  *         À toi de compléter la boucle : ping google.com + LED bleue.
+  */
+void TacheReseau(void *argument)
+{
+  (void)argument;
+
+  reseau_init();                       /* LwIP + Ethernet + DHCP (app_ethernet.c) */
+
+  if (!reseau_attendre_ip(30000))      /* 30 s pour que la box donne une IP */
+  {
+    printf("  [NET] Pas d'IP : la tache reseau continue d'attendre\r\n");
+  }
+
+  for (;;)
+  {
+    /* TODO (exercice) :
+     *  1. log_etat("Communication Reseau");
+     *  2. allumer la LED bleue pendant l'échange réseau
+     *  3. résoudre "google.com" (DNS) puis envoyer un ping (ICMP)
+     *  4. éteindre la LED bleue, afficher le résultat
+     * Pour l'instant, la carte répond déjà aux pings envoyés depuis ton PC. */
+    osDelay(10000);
   }
 }
 

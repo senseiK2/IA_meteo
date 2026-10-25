@@ -90,6 +90,12 @@ void HAL_ETH_MspInit(ETH_HandleTypeDef* heth)
   {
     /* USER CODE BEGIN ETH1_MspInit 0 */
 
+    /* CubeMX n'active que l'horloge ETH1 ; l'exemple ST active aussi celles
+     * du MAC, de l'émission et de la réception. */
+    __HAL_RCC_ETH1MAC_CLK_ENABLE();
+    __HAL_RCC_ETH1TX_CLK_ENABLE();
+    __HAL_RCC_ETH1RX_CLK_ENABLE();
+
     /* USER CODE END ETH1_MspInit 0 */
 
   /** Initializes the peripherals clock
@@ -159,6 +165,10 @@ void HAL_ETH_MspDeInit(ETH_HandleTypeDef* heth)
   if(heth->Instance==ETH1)
   {
     /* USER CODE BEGIN ETH1_MspDeInit 0 */
+
+    __HAL_RCC_ETH1MAC_CLK_DISABLE();
+    __HAL_RCC_ETH1TX_CLK_DISABLE();
+    __HAL_RCC_ETH1RX_CLK_DISABLE();
 
     /* USER CODE END ETH1_MspDeInit 0 */
     /* Peripheral clock disable */

@@ -71,7 +71,7 @@ extern uint32_t SystemCoreClock;
 #define configTICK_RATE_HZ                       ((TickType_t)1000)
 #define configMAX_PRIORITIES                     ( 56 )
 #define configMINIMAL_STACK_SIZE                 ((uint16_t)128)
-#define configTOTAL_HEAP_SIZE                    ((size_t)32768)
+#define configTOTAL_HEAP_SIZE                    ((size_t)65536)
 #define configSTACK_ALLOCATION_FROM_SEPARATE_HEAP 0
 #define configMAX_TASK_NAME_LEN                  ( 16 )
 #define configUSE_TRACE_FACILITY                 1
@@ -174,6 +174,13 @@ standard names. */
  * (X-CUBE-FREERTOS 1.3.1 génère 0 malgré l'option "TZ Secure Only".) */
 #undef  configRUN_FREERTOS_SECURE_ONLY
 #define configRUN_FREERTOS_SECURE_ONLY   1
+
+/* Le projet est compilé avec le FPU (-mfpu=fpv5-d16 -mfloat-abi=hard) et les
+ * tâches calculent en float (capteurs, puis modèle d'IA). Sans ceci, FreeRTOS
+ * ne sauvegarde pas les registres flottants s16-s31 lors des changements de
+ * tâche : deux tâches qui calculent en float peuvent corrompre leurs calculs. */
+#undef  configENABLE_FPU
+#define configENABLE_FPU                 1
 /* USER CODE END Defines */
 
 #endif /* __FREERTOS_CONFIG_H */
