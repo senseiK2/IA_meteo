@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "led.h"
+#include "ethernetif.h"   /* ethernetif_rif_config() */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -123,6 +124,10 @@ int main(void)
   /* USER CODE END Init */
 
   /* USER CODE BEGIN SysInit */
+
+  /* STM32N6 / RIF : le DMA Ethernet doit avoir le droit d'accéder à la RAM
+   * Secure. À faire AVANT MX_ETH1_Init() (voir ethernetif.c). */
+  ethernetif_rif_config();
 
   /* USER CODE END SysInit */
 

@@ -163,6 +163,19 @@ SECTIONS
     . = ALIGN(4);
   } >RAM
 
+  /* Descripteurs DMA Ethernet (déclarés par CubeMX dans main.c avec
+   * __attribute__((section(".RxDecripSection"))) ...). Sans ces lignes,
+   * l'éditeur de liens les place n'importe où avec un alignement de 4 octets ;
+   * on les aligne sur 32 octets pour le DMA (bus AXI 64 bits). */
+  .eth_descriptors (NOLOAD) :
+  {
+    . = ALIGN(32);
+    *(.RxDecripSection)
+    . = ALIGN(32);
+    *(.TxDecripSection)
+    . = ALIGN(32);
+  } >RAM
+
   /* Uninitialized data section into "RAM" Ram type memory */
   . = ALIGN(4);
   .bss :
