@@ -5,7 +5,7 @@
   * Description        : Tâches FreeRTOS de l'application (TP2).
   *
   *   DEMO_PARTIE choisit ce qui tourne, pour pouvoir montrer chaque partie
-  *   du TP à l'oral en changeant une seule ligne :
+  *   du TP en démonstration en changeant une seule ligne :
   *     1 -> TacheChenillard : 3 LEDs allumées 3 s, puis chenillard R/V/B (3 s)
   *     2 -> TacheCapteurs   : lecture des capteurs, LED rouge/verte
   *     3 -> TacheCapteurs + TacheReseau : + LwIP, ping google.com, LED bleue

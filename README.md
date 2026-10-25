@@ -23,7 +23,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 ├── firmware/
 │   └── IA_meteo/        # Projet STM32CubeIDE : FSBL (démarrage) + Appli (application)
 ├── ml/                  # TP3 : données Meteostat, entraînement TensorFlow, export ONNX/TFLite (voir ml/README.md)
-├── docs/                # Captures de logs, schémas, notes pour l'oral
+├── docs/                # Documentation : démarche, choix de conception, logs
 └── README.md
 ```
 
