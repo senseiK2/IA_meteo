@@ -22,7 +22,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 .
 ├── firmware/
 │   └── IA_meteo/        # Projet STM32CubeIDE : FSBL (démarrage) + Appli (application)
-├── ml/                  # TP3 : données, notebooks, modèles
+├── ml/                  # TP3 : données Meteostat, entraînement TensorFlow, export ONNX/TFLite (voir ml/README.md)
 ├── docs/                # Captures de logs, schémas, notes pour l'oral
 └── README.md
 ```
@@ -34,8 +34,10 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 - [x] TP2.3 – FreeRTOS (tâches capteurs / LED / réseau, timebase HAL sur TIM6)
 - [x] TP2.3 – LwIP intégré (Ethernet RMII + PHY LAN8742, DHCP, DNS, ICMP, sockets BSD)
 - [x] TP2.3 – Ping vers google.com (DNS + ICMP par socket RAW) + LED bleue
-- [ ] TP3 – Modèle de prédiction météo
-- [ ] Intégration de l'inférence sur le NPU
+- [x] TP3.1 – Pipeline d'entraînement (Meteostat → TensorFlow → ONNX / TFLite), étude du compromis
+- [ ] TP3.1 – Résultats de l'étude et choix du modèle
+- [ ] TP3.2 – Inférence MATLAB sur ThingSpeak + TalkBack
+- [ ] TP3.3 – Inférence sur le STM32N6 (X-CUBE-AI), comparaison cloud / edge, consommation
 
 ## Lancer le firmware
 

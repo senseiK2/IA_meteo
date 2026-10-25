@@ -1,0 +1,12 @@
+# TP3 - environnement Python (Python 3.10 à 3.12)
+#   pip install -r requirements.txt
+#   pip install --no-deps tf2onnx      <- à part, voir README (sinon il rétrograde protobuf)
+meteostat>=1.6
+numpy
+pandas
+scikit-learn
+matplotlib
+tabulate
+tensorflow>=2.15
+onnx
+onnxruntime

@@ -34,7 +34,12 @@ venv/
 *.h5.tmp
 
 # Données volumineuses (à documenter dans le README plutôt que versionner)
-ml/data/raw/
+ml/data/
+
+# Secrets (clés API ThingSpeak...) : jamais sur GitHub
+secrets.h
+*.secret
+.env
 
 # ===== Divers =====
 .DS_Store
