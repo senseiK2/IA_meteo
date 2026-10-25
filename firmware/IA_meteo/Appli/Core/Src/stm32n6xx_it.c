@@ -55,6 +55,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern ETH_HandleTypeDef heth1;
 extern TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN EV */
@@ -186,6 +187,20 @@ void TIM6_IRQHandler(void)
   /* USER CODE BEGIN TIM6_IRQn 1 */
 
   /* USER CODE END TIM6_IRQn 1 */
+}
+
+/**
+  * @brief This function handles ETH1 global interrupt.
+  */
+void ETH1_IRQHandler(void)
+{
+  /* USER CODE BEGIN ETH1_IRQn 0 */
+
+  /* USER CODE END ETH1_IRQn 0 */
+  HAL_ETH_IRQHandler(&heth1);
+  /* USER CODE BEGIN ETH1_IRQn 1 */
+
+  /* USER CODE END ETH1_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
