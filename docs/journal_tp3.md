@@ -86,4 +86,39 @@ mesurant, pas au hasard. »*
 
 ## Étape 3 – Les entrées du modèle
 
-*(à venir)*
+**L'idée** : le modèle ne voit que des nombres. On peut l'aider en lui
+donnant des nombres **calculés** à partir des mesures ou de l'heure, sans
+capteur supplémentaire. Toutes les formules sont dans
+`ml/meteo_features.py` et devront être refaites **à l'identique** dans
+MATLAB et sur la carte.
+
+| Entrée | Calcul | Pourquoi |
+|---|---|---|
+| temp, rhum | SHT40 | mesures de base |
+| pres | LPS22DF **ramenée au niveau de la mer** | Meteostat donne la pression au niveau de la mer ; à 235 m la carte lit ≈ 28 hPa de moins |
+| ecart_rosee | temp − point de rosée (formule de Magnus) | écart ≈ 0 → air saturé → brouillard ou pluie |
+| heure_sin, heure_cos | heure UTC sur un cercle | le brouillard est surtout nocturne / au petit matin |
+| jour_sin, jour_cos | jour de l'année sur un cercle | saisons : neige l'hiver, orages l'été, brouillard l'automne |
+| dp3h | pression maintenant − pression il y a 3 h | **une pression qui baisse annonce la pluie** (le baromètre) |
+
+**Pourquoi sinus et cosinus ?** Avec un seul nombre, 23 h et 0 h semblent
+très éloignés (23 contre 0) alors qu'ils se suivent. On place l'heure sur un
+cercle, comme l'aiguille d'une horloge : ses deux coordonnées (cos, sin)
+mettent 23 h juste à côté de 0 h. Même chose pour le 31 décembre et le
+1er janvier.
+
+**Les contreparties (à dire à l'oral)**
+
+- Heure et saison → la carte doit connaître la date et l'heure → synchronisation
+  par le réseau (SNTP).
+- dp3h → il faut **3 h de mesures** avant la première prédiction : gênant pour
+  une démo « clé en main ». Solutions possibles : récupérer l'historique sur
+  ThingSpeak, ou se passer de cette entrée.
+
+**Décision** : comme pour les classes, on **mesure** ce que chaque entrée
+apporte. On compare 4 jeux d'entrées : mesures seules → + point de rosée →
++ heure/saison → + tendance de pression.
+
+**Phrase pour le pitch** : *« Pas de capteur en plus : on tire plus
+d'information des mêmes mesures, en calculant le point de rosée et la
+tendance de la pression, comme un baromètre. »*
