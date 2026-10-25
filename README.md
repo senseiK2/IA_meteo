@@ -33,7 +33,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 - [x] TP2.2 – Lecture capteurs I²C (SHT40, LPS22DF, STTS22H sur IKS4A1) + LEDs d'état
 - [x] TP2.3 – FreeRTOS (tâches capteurs / LED / réseau, timebase HAL sur TIM6)
 - [x] TP2.3 – LwIP intégré (Ethernet RMII + PHY LAN8742, DHCP, DNS, ICMP, sockets BSD)
-- [ ] TP2.3 – Ping vers google.com + LED bleue (exercice)
+- [x] TP2.3 – Ping vers google.com (DNS + ICMP par socket RAW) + LED bleue
 - [ ] TP3 – Modèle de prédiction météo
 - [ ] Intégration de l'inférence sur le NPU
 
@@ -48,6 +48,23 @@ et 256 Ko de RAM, Appli dispose de 2 Mo de RAM (nécessaire pour FreeRTOS, LwIP 
 le modèle d'IA). En mode développement, le débogueur charge Appli directement en RAM.
 
 > En mode développement, le programme est chargé en RAM : il est perdu à la coupure d'alimentation.
+
+### Choisir la partie du TP à montrer
+
+Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
+
+```c
+#define DEMO_PARTIE        3
+```
+
+| Valeur | Ce qui tourne | LEDs |
+|---|---|---|
+| `1` | 3 LEDs allumées 3 s, puis chenillard rouge → vert → bleu (3 s), logs `<ROUGE>`… | toutes |
+| `2` | Lecture des 3 capteurs toutes les 5 s | rouge = lecture, vert = en attente |
+| `3` | Capteurs + réseau : DHCP, ping google.com toutes les 10 s | + bleu = communication réseau |
+
+Les messages de plusieurs tâches ne se mélangent pas sur la console : chaque bloc
+de `printf` est protégé par un mutex (`console.c`).
 
 ## Réseau (LwIP)
 

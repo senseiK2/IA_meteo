@@ -20,6 +20,7 @@
   */
 #include "app_ethernet.h"
 #include "ethernetif.h"
+#include "console.h"
 #include "cmsis_os2.h"
 #include "lwip/tcpip.h"
 #include "lwip/dhcp.h"
@@ -31,8 +32,10 @@ struct netif gnetif;
 
 static void log_reseau(const char *etat)
 {
+  console_lock();
   printf("[%8lu ms] <Communication Reseau> %s\r\n",
          (unsigned long)osKernelGetTickCount(), etat);
+  console_unlock();
 }
 
 /* Appelé par LwIP quand le câble est branché ou débranché */
@@ -62,11 +65,13 @@ static void status_callback(struct netif *netif)
     ip4addr_ntoa_r(netif_ip4_gw(netif),      gw,   sizeof(gw));
     ip4addr_ntoa_r(ip_2_ip4(dns_getserver(0)), dns, sizeof(dns));
 
-    log_reseau("adresse IP obtenue");
+    console_lock();                    /* les 5 lignes d'un seul tenant */
+    log_reseau("adresse IP obtenue");  /* mutex récursif : on peut le reprendre */
     printf("  IP         : %s\r\n", ip);
     printf("  Masque     : %s\r\n", mask);
     printf("  Passerelle : %s\r\n", gw);
     printf("  DNS        : %s\r\n", dns);
+    console_unlock();
   }
 }
 
