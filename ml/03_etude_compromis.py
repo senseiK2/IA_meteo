@@ -1,13 +1,14 @@
 """
 03_etude_compromis.py - TP3.1b : compromis nombre de classes / taille / précision.
 
-Trois expériences, chacune ne fait varier QU'UN facteur à la fois :
+Quatre expériences, chacune ne fait varier QU'UN facteur à la fois :
   A. schéma de classes x taille du réseau   (entrées par défaut)
   B. jeu d'entrées                           (schéma et taille par défaut)
   C. horizon de prévision 0 / 3 / 6 h        (schéma et taille par défaut)
+  D. poids des classes aucun / racine / complets, pour 3 et 4 classes
 
 Utilisation :
-    python 03_etude_compromis.py            # A + B + C (~quelques minutes sur CPU)
+    python 03_etude_compromis.py            # A + B + C + D (~15 à 20 min sur CPU)
     python 03_etude_compromis.py --seulement A
 
 Sorties dans results/ :
@@ -31,11 +32,14 @@ def ligne(res, experience):
         "schema": res["schema"], "n_classes": len(res["classes"]),
         "taille": res["taille"], "couches": str(res["couches"]),
         "entrees": res["jeu_entrees"], "n_entrees": len(res["entrees"]),
-        "horizon_h": res["horizon_h"],
+        "horizon_h": res["horizon_h"], "poids": res["poids_classes"],
         "parametres": res["parametres"], "octets_int8": res["octets_int8"],
         "accuracy": round(t["accuracy"], 4),
         "balanced_accuracy": round(t["balanced_accuracy"], 4),
         "f1_macro": round(t["f1_macro"], 4),
+        # précision moyenne : faible = beaucoup de fausses alertes
+        "precision_moyenne": round(sum(t["precision_par_classe"].values())
+                                   / len(t["precision_par_classe"]), 4),
         "reference_majoritaire": round(res["reference_majoritaire"]["accuracy_test"], 4),
         "epoques": res["epoques"],
     }
@@ -65,7 +69,7 @@ def tracer(df, chemin):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--seulement", choices=["A", "B", "C"])
+    p.add_argument("--seulement", choices=["A", "B", "C", "D"])
     p.add_argument("--station", default=config.STATION_ID)
     args = p.parse_args()
 
@@ -87,6 +91,10 @@ def main():
     if args.seulement in (None, "C"):
         for h in (0, 3, 6):
             lancer("C", jeu_nom="tendance", horizon_h=h)
+    if args.seulement in (None, "D"):
+        for schema in ("3_classes", "4_classes"):
+            for poids in ("aucun", "racine", "complets"):
+                lancer("D", schema_nom=schema, poids=poids)
 
     df = pd.DataFrame(lignes)
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -97,7 +105,8 @@ def main():
                 f"test = année {config.ANNEE_TEST})\n\n")
         f.write("Hyperparamètres : `" + json.dumps(config.HYPERPARAMS) + "`\n\n")
         for exp, titre in [("A", "A. Classes x taille"), ("B", "B. Jeux d'entrées"),
-                           ("C", "C. Horizon de prévision")]:
+                           ("C", "C. Horizon de prévision"),
+                           ("D", "D. Poids des classes")]:
             sous = df[df.experience == exp].drop(columns="experience")
             if len(sous):
                 f.write(f"## {titre}\n\n{sous.to_markdown(index=False)}\n\n")

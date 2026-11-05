@@ -50,17 +50,27 @@ def preparer(df_brut, schema_nom, jeu_nom, horizon_h=0):
     }
 
 
-def poids_des_classes(y, n_classes):
-    """Poids inversement proportionnel à la fréquence de chaque classe.
+def poids_des_classes(y, n_classes, mode="complets"):
+    """Poids de chaque classe dans le calcul de l'erreur.
 
     Sans poids, un modèle qui répond toujours "Nuageux" a déjà une bonne
     accuracy et n'apprend jamais à reconnaître la pluie ou le brouillard.
-    Avec les poids, se tromper sur une classe rare "coûte" plus cher.
+    Avec des poids, se tromper sur une classe rare "coûte" plus cher.
+
+    mode = "aucun"    : toutes les erreurs comptent pareil
+           "complets" : poids = 1 / fréquence. Une classe 5 fois plus rare
+                        compte 5 fois plus. Détecte bien les classes rares,
+                        mais au prix de nombreuses fausses alertes.
+           "racine"   : racine carrée des poids complets (5 fois plus rare
+                        -> compte ~2,2 fois plus). Compromis entre les deux.
     """
+    if mode == "aucun":
+        return None
     comptes = np.bincount(y, minlength=n_classes)
     poids = {}
     for c in range(n_classes):
-        poids[c] = float(len(y) / (n_classes * comptes[c])) if comptes[c] else 0.0
+        p = float(len(y) / (n_classes * comptes[c])) if comptes[c] else 0.0
+        poids[c] = float(np.sqrt(p)) if mode == "racine" else p
     return poids
 
 
@@ -97,7 +107,8 @@ def construire_modele(n_entrees, n_classes, couches, dropout):
 # ---------------------------------------------------------------------------
 def evaluer(modele, X, y, classes):
     from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
-                                 f1_score, confusion_matrix, recall_score)
+                                 f1_score, confusion_matrix, recall_score,
+                                 precision_score)
     proba = modele.predict(X, batch_size=4096, verbose=0)
     pred = proba.argmax(axis=1)
     labels = list(range(len(classes)))
@@ -112,6 +123,11 @@ def evaluer(modele, X, y, classes):
         "rappel_par_classe": {c: float(r) for c, r in zip(
             classes, recall_score(y, pred, labels=labels, average=None,
                                   zero_division=0))},
+        # précision : quand le modèle annonce cette classe, part des fois où
+        # c'est vrai (faible précision = beaucoup de fausses alertes)
+        "precision_par_classe": {c: float(p) for c, p in zip(
+            classes, precision_score(y, pred, labels=labels, average=None,
+                                     zero_division=0))},
         "effectif_par_classe": {c: int(n) for c, n in zip(
             classes, np.bincount(y, minlength=len(classes)))},
         "matrice_confusion": confusion_matrix(y, pred, labels=labels).tolist(),
@@ -128,23 +144,28 @@ def taille_modele(modele):
 # ---------------------------------------------------------------------------
 # Entraînement complet
 # ---------------------------------------------------------------------------
-def nom_experience(schema_nom, taille_nom, jeu_nom, horizon_h):
-    return f"{schema_nom}_{taille_nom}_{jeu_nom}_h{horizon_h}"
+def nom_experience(schema_nom, taille_nom, jeu_nom, horizon_h, poids=None):
+    nom = f"{schema_nom}_{taille_nom}_{jeu_nom}_h{horizon_h}"
+    if poids and poids != config.HYPERPARAMS["poids_classes"]:
+        nom += f"_p{poids}"          # suffixe seulement si différent du défaut
+    return nom
 
 
 def entrainer(df_brut, schema_nom=config.SCHEMA_DEFAUT,
               taille_nom=config.TAILLE_DEFAUT, jeu_nom=config.JEU_ENTREES_DEFAUT,
-              horizon_h=0, sauver=True, verbose=2):
+              horizon_h=0, poids=None, sauver=True, verbose=2):
     from tensorflow import keras
 
-    hp = config.HYPERPARAMS
+    hp = dict(config.HYPERPARAMS)
+    if poids:                                    # réglage choisi pour cet essai
+        hp["poids_classes"] = poids
     keras.utils.set_random_seed(hp["seed"])      # mêmes résultats à chaque essai
 
     d = preparer(df_brut, schema_nom, jeu_nom, horizon_h)
     (Xtr, ytr), (Xva, yva), (Xte, yte) = d["train"], d["val"], d["test"]
     n_classes = len(d["classes"])
     couches = config.TAILLES_MODELE[taille_nom]
-    nom = nom_experience(schema_nom, taille_nom, jeu_nom, horizon_h)
+    nom = nom_experience(schema_nom, taille_nom, jeu_nom, horizon_h, hp["poids_classes"])
     print(f"\n=== {nom} : {len(Xtr)} train / {len(Xva)} val / {len(Xte)} test, "
           f"{len(d['entrees'])} entrées -> {couches} -> {n_classes} classes")
 
@@ -163,7 +184,7 @@ def entrainer(df_brut, schema_nom=config.SCHEMA_DEFAUT,
     hist = modele.fit(
         Xtr, ytr, validation_data=(Xva, yva),
         epochs=hp["epochs_max"], batch_size=hp["batch_size"],
-        class_weight=poids_des_classes(ytr, n_classes) if hp["poids_classes"] else None,
+        class_weight=poids_des_classes(ytr, n_classes, hp["poids_classes"]),
         callbacks=rappels, verbose=verbose)
     duree = time.time() - t0
 
@@ -174,7 +195,8 @@ def entrainer(df_brut, schema_nom=config.SCHEMA_DEFAUT,
     resultats = {
         "nom": nom, "schema": schema_nom, "taille": taille_nom,
         "couches": couches, "jeu_entrees": jeu_nom, "entrees": d["entrees"],
-        "horizon_h": horizon_h, "classes": d["classes"],
+        "horizon_h": horizon_h, "poids_classes": hp["poids_classes"],
+        "classes": d["classes"],
         "hyperparametres": hp, "epoques": len(hist.history["loss"]),
         "duree_entrainement_s": round(duree, 1),
         **taille_modele(modele),
