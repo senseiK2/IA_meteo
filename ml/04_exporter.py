@@ -3,23 +3,25 @@
 
 Utilisation :
     python 04_exporter.py                          # modèle par défaut de config.py
-    python 04_exporter.py --modele 6_classes_M_temps_h0
+    python 04_exporter.py --modele 4_classes_S_temps_h3
 
 Chaîne d'export :
     model.keras ──► ONNX   (tf2onnx)        -> MATLAB : importONNXNetwork
                 └─► TFLite float32 / int8   -> X-CUBE-AI / NPU du STM32N6
                     (+ l'ONNX, aussi accepté par X-CUBE-AI)
 
-Fichiers produits dans models/export/ (noms fixes : MATLAB les télécharge
-depuis GitHub, le firmware les inclut, sans changer de code à chaque modèle) :
-    modele_meteo.onnx            réseau au format ONNX
-    modele_meteo_float.tflite    réseau TFLite 32 bits (référence)
-    modele_meteo_int8.tflite     réseau TFLite quantifié 8 bits (NPU)
-    meteo_modele.json            entrées, normalisation, classes (pour MATLAB)
-    meteo_modele.h               idem en C (pour le firmware)
-    vecteurs_test.csv            exemples réels + réponse attendue : MATLAB et
-                                 la carte doivent retrouver les MÊMES résultats
-    export.json                  vérifications (écarts Keras/ONNX/TFLite)
+Fichiers produits dans models/export/, suffixés par l'horizon du modèle
+(_h0 = temps actuel, _h3 = dans 3 h). Noms fixes : MATLAB les télécharge
+depuis GitHub, le firmware les inclut, sans changer de code à chaque modèle.
+    modele_meteo_h0.onnx            réseau au format ONNX
+    modele_meteo_h0_float.tflite    réseau TFLite 32 bits (référence)
+    modele_meteo_h0_int8.tflite     réseau TFLite quantifié 8 bits (NPU)
+    meteo_modele_h0.json            entrées, normalisation, classes (MATLAB)
+    meteo_modele_h0.h               idem en C, préfixe METEO_H0_ (firmware)
+    vecteurs_test_h0.csv            exemples réels + réponse attendue : MATLAB
+                                    et la carte doivent retrouver les MÊMES
+                                    résultats
+    export_h0.json                  vérifications (écarts Keras/ONNX/TFLite)
 """
 import argparse
 import json
@@ -219,7 +221,7 @@ def ecrire_entete_c(chemin, info, X_brut, proba):
 
     l = []
     l.append("/**")
-    l.append("  * @file    meteo_modele.h")
+    l.append(f"  * @file    meteo_modele_h{info['horizon_h']}.h")
     l.append("  * @brief   Paramètres du modèle météo, générés par ml/04_exporter.py.")
     l.append("  *          NE PAS MODIFIER À LA MAIN : relancer le script.")
     l.append(f"  *          Modèle : {info['modele']} ({info['date_export']})")
@@ -259,7 +261,11 @@ def ecrire_entete_c(chemin, info, X_brut, proba):
              + ", ".join(str(int(p.argmax())) for p in proba) + " };")
     l.append("")
     l.append("#endif /* METEO_MODELE_H */")
-    chemin.write_text("\n".join(l) + "\n", encoding="utf-8")
+    # Préfixe propre à chaque modèle (METEO_H0_, METEO_H3_...) : les deux
+    # fichiers .h peuvent être inclus dans le même programme sans conflit.
+    texte = "\n".join(l) + "\n"
+    texte = texte.replace("METEO_", f"METEO_H{info['horizon_h']}_")
+    chemin.write_text(texte, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -281,17 +287,18 @@ def main():
     n_e = len(d["entrees"])
 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    sfx = f"h{res['horizon_h']}"                 # suffixe des fichiers : h0, h3...
     p_keras = modele.predict(Xte, batch_size=4096, verbose=0)
 
     print("ONNX...")
-    f_onnx = EXPORT_DIR / "modele_meteo.onnx"
+    f_onnx = EXPORT_DIR / f"modele_meteo_{sfx}.onnx"
     methode = exporter_onnx(modele, n_e, f_onnx)
     p_onnx = predire_onnx(f_onnx, Xte)
     print(f"  {methode} : écart max Keras/ONNX = {np.abs(p_onnx - p_keras).max():.2e}")
 
     print("TFLite...")
-    f_float = EXPORT_DIR / "modele_meteo_float.tflite"
-    f_int8 = EXPORT_DIR / "modele_meteo_int8.tflite"
+    f_float = EXPORT_DIR / f"modele_meteo_{sfx}_float.tflite"
+    f_int8 = EXPORT_DIR / f"modele_meteo_{sfx}_int8.tflite"
     exporter_tflite(modele, n_e, d["train"][0], f_float, f_int8)
     p_float = predire_tflite(f_float, Xte)
     p_int8 = predire_tflite(f_int8, Xte)
@@ -326,14 +333,14 @@ def main():
         "classes": d["classes"],
         "codes_coco": {c: config.SCHEMAS_CLASSES[res["schema"]][c] for c in d["classes"]},
     }
-    (EXPORT_DIR / "meteo_modele.json").write_text(
+    (EXPORT_DIR / f"meteo_modele_{sfx}.json").write_text(
         json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
 
     _, X_brut, y_v, p_v = vecteurs_test(d, p_keras)
-    ecrire_csv_vecteurs(EXPORT_DIR / "vecteurs_test.csv", d, X_brut, y_v, p_v)
-    ecrire_entete_c(EXPORT_DIR / "meteo_modele.h", info, X_brut, p_v)
-    (EXPORT_DIR / "export.json").write_text(json.dumps(verif, indent=2), encoding="utf-8")
-    shutil.copy(dossier / "model.keras", EXPORT_DIR / "modele_meteo.keras")
+    ecrire_csv_vecteurs(EXPORT_DIR / f"vecteurs_test_{sfx}.csv", d, X_brut, y_v, p_v)
+    ecrire_entete_c(EXPORT_DIR / f"meteo_modele_{sfx}.h", info, X_brut, p_v)
+    (EXPORT_DIR / f"export_{sfx}.json").write_text(json.dumps(verif, indent=2), encoding="utf-8")
+    shutil.copy(dossier / "model.keras", EXPORT_DIR / f"modele_meteo_{sfx}.keras")
     print(f"\nExport terminé : {EXPORT_DIR}")
 
 
