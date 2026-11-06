@@ -128,17 +128,42 @@ def predire_onnx(chemin, X):
 # ---------------------------------------------------------------------------
 # TFLite
 # ---------------------------------------------------------------------------
-def exporter_tflite(modele, n_entrees, X_repr, chemin_float, chemin_int8):
-    """Batch fixé à 1 : sur la carte, on classe une mesure à la fois, et
-    X-CUBE-AI préfère des dimensions fixes (mémoire réservée à l'avance)."""
+def fonction_mlp_figee(modele, n_entrees):
+    """Réécrit le MLP comme une fonction TensorFlow dont les poids sont des
+    CONSTANTES (et non des variables Keras).
+
+    Le convertisseur TFLite de TensorFlow récent n'arrive pas à quantifier un
+    modèle Keras 3 dont les poids sont des variables (erreur READ_VARIABLE).
+    Avec des constantes, plus de variable : la conversion marche à tous les
+    coups. Le calcul est exactement le même, y = activation(x · W + b) couche
+    après couche, et il est vérifié ensuite contre le modèle Keras.
+
+    Batch fixé à 1 : sur la carte, on classe une mesure à la fois, et
+    X-CUBE-AI préfère des dimensions fixes (mémoire réservée à l'avance).
+    """
     import tensorflow as tf
+
+    couches = []
+    for c in modele.layers:
+        if c.__class__.__name__ == "Dense":       # Dropout : inactif en inférence
+            W, b = c.get_weights()
+            couches.append((tf.constant(W), tf.constant(b), c.get_config()["activation"]))
 
     @tf.function(input_signature=[tf.TensorSpec([1, n_entrees], tf.float32, name="input")])
     def f(x):
-        return modele(x, training=False)
-    concrete = f.get_concrete_function()
+        for W, b, act in couches:
+            x = tf.matmul(x, W) + b
+            x = tf.nn.relu(x) if act == "relu" else tf.nn.softmax(x)
+        return x
+    return f.get_concrete_function()
 
-    conv = tf.lite.TFLiteConverter.from_concrete_functions([concrete], modele)
+
+def exporter_tflite(modele, n_entrees, X_repr, chemin_float, chemin_int8):
+    """Écrit les versions float32 et int8. Renvoie False si l'int8 a échoué."""
+    import tensorflow as tf
+    concrete = fonction_mlp_figee(modele, n_entrees)
+
+    conv = tf.lite.TFLiteConverter.from_concrete_functions([concrete])
     chemin_float.write_bytes(conv.convert())
 
     # Quantification int8 : chaque poids et chaque activation est stocké sur
@@ -150,13 +175,19 @@ def exporter_tflite(modele, n_entrees, X_repr, chemin_float, chemin_int8):
         for i in range(min(1000, len(X_repr))):
             yield [X_repr[i:i + 1]]
 
-    conv = tf.lite.TFLiteConverter.from_concrete_functions([concrete], modele)
+    conv = tf.lite.TFLiteConverter.from_concrete_functions([concrete])
     conv.optimizations = [tf.lite.Optimize.DEFAULT]
     conv.representative_dataset = representatif
     conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     # Entrée / sortie laissées en float32 : le convertisseur ajoute lui-même
     # les étapes Quantize / Dequantize au début et à la fin du graphe.
-    chemin_int8.write_bytes(conv.convert())
+    try:
+        chemin_int8.write_bytes(conv.convert())
+        return True
+    except Exception as e:                               # noqa: BLE001
+        # On ne bloque pas le reste de l'export (ONNX, .h, .json...)
+        print(f"  int8 impossible ({type(e).__name__}: {e})")
+        return False
 
 
 def predire_tflite(chemin, X):
@@ -299,13 +330,17 @@ def main():
     print("TFLite...")
     f_float = EXPORT_DIR / f"modele_meteo_{sfx}_float.tflite"
     f_int8 = EXPORT_DIR / f"modele_meteo_{sfx}_int8.tflite"
-    exporter_tflite(modele, n_e, d["train"][0], f_float, f_int8)
+    int8_ok = exporter_tflite(modele, n_e, d["train"][0], f_float, f_int8)
     p_float = predire_tflite(f_float, Xte)
-    p_int8 = predire_tflite(f_int8, Xte)
+    # Sans int8, on reprend les sorties float pour que la suite fonctionne ;
+    # export.json indique alors "int8": false.
+    p_int8 = predire_tflite(f_int8, Xte) if int8_ok else p_float
 
     ev_keras = evaluer(_ModeleNumpy(p_keras), Xte, yte, d["classes"])
     ev_int8 = evaluer(_ModeleNumpy(p_int8), Xte, yte, d["classes"])
+    fichiers = [f for f in (f_onnx, f_float, f_int8) if f.exists()]
     verif = {
+        "int8": int8_ok,
         "modele": args.modele,
         "methode_onnx": methode,
         "ecart_max_keras_onnx": float(np.abs(p_onnx - p_keras).max()),
@@ -315,11 +350,12 @@ def main():
         "accuracy_test_int8": ev_int8["accuracy"],
         "balanced_accuracy_test_float": ev_keras["balanced_accuracy"],
         "balanced_accuracy_test_int8": ev_int8["balanced_accuracy"],
-        "taille_octets": {f.name: f.stat().st_size for f in (f_onnx, f_float, f_int8)},
+        "taille_octets": {f.name: f.stat().st_size for f in fichiers},
     }
     print(f"  écart max Keras/TFLite float = {verif['ecart_max_keras_tflite_float']:.2e}")
-    print(f"  int8 : même classe que Keras pour {verif['accord_classes_keras_int8']:.1%} "
-          f"des heures, accuracy {ev_keras['accuracy']:.3f} -> {ev_int8['accuracy']:.3f}")
+    if int8_ok:
+        print(f"  int8 : même classe que Keras pour {verif['accord_classes_keras_int8']:.1%} "
+              f"des heures, accuracy {ev_keras['accuracy']:.3f} -> {ev_int8['accuracy']:.3f}")
     print(f"  tailles : {verif['taille_octets']}")
 
     info = {
