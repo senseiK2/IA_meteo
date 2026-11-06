@@ -140,7 +140,7 @@ HYPERPARAMS = {
     "epochs_max":     150,    # plafond : l'early stopping arrête bien avant
     "patience":       12,     # époques sans progrès (val_loss) avant arrêt
     "dropout":        0.1,    # régularisation légère (petit réseau, beaucoup de données)
-    "poids_classes":  "complets",  # "aucun", "racine" ou "complets" (voir
+    "poids_classes":  "racine",    # "aucun", "racine" ou "complets" (voir
                                    # poids_des_classes dans entrainement.py)
     "seed":           42,     # reproductibilité
 }
