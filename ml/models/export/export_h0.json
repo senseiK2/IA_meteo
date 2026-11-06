@@ -1,0 +1,17 @@
+{
+  "int8": true,
+  "modele": "4_classes_S_temps_h0",
+  "methode_onnx": "tf2onnx.from_keras",
+  "ecart_max_keras_onnx": 2.384185791015625e-07,
+  "ecart_max_keras_tflite_float": 2.980232238769531e-07,
+  "accord_classes_keras_int8": 0.9898401826484018,
+  "accuracy_test_float": 0.6275114155251141,
+  "accuracy_test_int8": 0.6261415525114156,
+  "balanced_accuracy_test_float": 0.7068034776335403,
+  "balanced_accuracy_test_int8": 0.7056049972721163,
+  "taille_octets": {
+    "modele_meteo_h0.onnx": 3568,
+    "modele_meteo_h0_float.tflite": 3504,
+    "modele_meteo_h0_int8.tflite": 3648
+  }
+}
