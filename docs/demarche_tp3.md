@@ -250,3 +250,52 @@ accuracy équilibrée que les poids complets avec 8 points d'accuracy en plus.
 Le modèle « 0 h » est utilisé dans le cloud (MATLAB / ThingSpeak) et sur la
 carte, pour la comparaison cloud / edge. Le modèle « +3 h » est déployé en
 complément sur la carte.
+
+### Résultats des modèles retenus (année de test 2025)
+
+| Classe | Rappel h0 | Précision h0 | Rappel h3 | Précision h3 |
+|---|---|---|---|---|
+| Clair | 86,1 % | 51,8 % | 85,8 % | 49,7 % |
+| Nuageux | 55,1 % | 86,1 % | 52,8 % | 85,2 % |
+| Brouillard | 73,4 % | 38,4 % | 61,8 % | 34,7 % |
+| Précipitations | 68,1 % | 46,5 % | 68,6 % | 44,2 % |
+| **Accuracy équilibrée** | **70,7 %** | | **67,3 %** | |
+
+Matrices de confusion et courbes d'apprentissage :
+`ml/models/4_classes_S_temps_h0/` et `ml/models/4_classes_S_temps_h3/`.
+
+---
+
+## 7. Export (`ml/04_exporter.py`)
+
+Chaque modèle est exporté dans `ml/models/export/` (suffixe `_h0` ou `_h3`) :
+
+| Fichier | Destination |
+|---|---|
+| `modele_meteo_hX.onnx` | MATLAB / ThingSpeak (TP3.2) |
+| `modele_meteo_hX_float.tflite`, `modele_meteo_hX_int8.tflite` | X-CUBE-AI, STM32N6 (TP3.3) |
+| `meteo_modele_hX.json` | Entrées, normalisation, classes (MATLAB) |
+| `meteo_modele_hX.h` | Idem en C, préfixe `METEO_HX_` (firmware) |
+| `vecteurs_test_hX.csv` | Heures réelles et sorties attendues, pour valider MATLAB et la carte |
+
+Vérifications automatiques sur l'année de test :
+
+| Vérification | h0 | h3 |
+|---|---|---|
+| Écart maximal Keras / ONNX | 2,4·10⁻⁷ | 2,4·10⁻⁷ |
+| Écart maximal Keras / TFLite float32 | 3,0·10⁻⁷ | 3,0·10⁻⁷ |
+| Même classe Keras / TFLite int8 | 99,0 % des heures | 98,6 % des heures |
+| Accuracy float32 → int8 | 62,8 % → 62,6 % | 60,5 % → 61,0 % |
+
+La quantification int8 ne dégrade pas le modèle. Les fichiers int8 (3,6 ko) ne
+sont pas plus petits que les fichiers float32 (3,5 ko) : avec environ
+480 paramètres, les poids ne représentent qu'une petite partie du fichier, le
+reste étant la description du graphe et les paramètres de quantification.
+L'intérêt de l'int8 est l'exécution sur le NPU du STM32N6 (TP3.3).
+
+Deux difficultés rencontrées avec TensorFlow récent (Keras 3) :
+- `tf2onnx` s'installe sans ses dépendances (`--no-deps`), sinon il impose une
+  ancienne version de protobuf incompatible avec TensorFlow ;
+- la quantification int8 échoue sur les variables Keras (`READ_VARIABLE`) : le
+  réseau est réécrit en fonction TensorFlow à poids constants avant
+  conversion.

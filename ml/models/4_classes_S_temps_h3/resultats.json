@@ -1,0 +1,95 @@
+{
+  "nom": "4_classes_S_temps_h3",
+  "schema": "4_classes",
+  "taille": "S",
+  "couches": [
+    16,
+    16
+  ],
+  "jeu_entrees": "temps",
+  "entrees": [
+    "temp",
+    "rhum",
+    "pres",
+    "ecart_rosee",
+    "heure_sin",
+    "heure_cos",
+    "jour_sin",
+    "jour_cos"
+  ],
+  "horizon_h": 3,
+  "poids_classes": "racine",
+  "classes": [
+    "Clair",
+    "Nuageux",
+    "Brouillard",
+    "Precipitations"
+  ],
+  "hyperparametres": {
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "epochs_max": 150,
+    "patience": 12,
+    "dropout": 0.1,
+    "poids_classes": "racine",
+    "seed": 42
+  },
+  "epoques": 32,
+  "duree_entrainement_s": 24.0,
+  "parametres": 484,
+  "octets_float32": 1936,
+  "octets_int8": 484,
+  "reference_majoritaire": {
+    "classe": "Nuageux",
+    "accuracy_test": 0.6354916067146283
+  },
+  "test": {
+    "accuracy": 0.6051159072741806,
+    "balanced_accuracy": 0.6726731379183677,
+    "f1_macro": 0.5659251241972424,
+    "rappel_par_classe": {
+      "Clair": 0.8581907090464548,
+      "Nuageux": 0.5281221922731356,
+      "Brouillard": 0.6180327868852459,
+      "Precipitations": 0.6863468634686347
+    },
+    "precision_par_classe": {
+      "Clair": 0.4971671388101983,
+      "Nuageux": 0.8523781902552204,
+      "Brouillard": 0.34650735294117646,
+      "Precipitations": 0.442225392296719
+    },
+    "effectif_par_classe": {
+      "Clair": 1227,
+      "Nuageux": 5565,
+      "Brouillard": 610,
+      "Precipitations": 1355
+    },
+    "matrice_confusion": [
+      [
+        1053,
+        148,
+        14,
+        12
+      ],
+      [
+        973,
+        2939,
+        614,
+        1039
+      ],
+      [
+        12,
+        99,
+        377,
+        122
+      ],
+      [
+        80,
+        262,
+        83,
+        930
+      ]
+    ]
+  }
+}

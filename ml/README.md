@@ -93,10 +93,10 @@ de paramètres).
 |---|---|---|
 | Optimiseur | Adam, lr = 1e-3 | Valeur standard, stable sans réglage fin. `ReduceLROnPlateau` divise le pas par 2 quand la validation stagne. |
 | Fonction de perte | entropie croisée (sparse) | Classification multi-classes. Les étiquettes sont des entiers. |
-| Batch | 256 | Environ 250 lots par époque : rapide sur CPU, gradient peu bruité. |
+| Batch | 256 | Environ 210 lots par époque : rapide sur CPU, gradient peu bruité. |
 | Époques | max 150, *early stopping* (patience 12) | On s'arrête quand la perte de validation ne baisse plus, et on revient aux meilleurs poids. Pas de nombre d'époques arbitraire. |
 | Dropout | 0,1 | Régularisation légère : le réseau est petit et les données nombreuses. |
-| Poids des classes | inverses des fréquences | Sans eux, répondre « Nuageux » à tout donne déjà une bonne accuracy. |
+| Poids des classes | racine carrée de l'inverse des fréquences | Sans poids, le modèle délaisse les classes rares ; avec des poids complets, il multiplie les fausses alertes (expérience D). |
 | Normalisation | centrage-réduction (stats du train) | La pression (≈ 1015) écraserait les autres entrées. Moyenne et écart-type sont exportés pour MATLAB et le C. |
 | Graine | 42 | Résultats reproductibles. |
 
@@ -113,4 +113,14 @@ de paramètres).
 
 ## Résultats
 
-*(À compléter avec `results/etude_compromis.md` après exécution.)*
+Étude complète : [`results/etude_compromis.md`](results/etude_compromis.md).
+Analyse et choix : [`../docs/demarche_tp3.md`](../docs/demarche_tp3.md).
+
+Modèles retenus : 4 classes (Clair, Nuageux, Brouillard, Précipitations),
+réseau S (8 → 16 → 16 → 4, 484 paramètres), entrées « temps », poids de
+classes « racine ».
+
+| Modèle | Rôle | Accuracy équilibrée (test 2025) |
+|---|---|---|
+| `_h0` | temps actuel (cloud et carte) | 70,7 % |
+| `_h3` | prévision à +3 h (carte) | 67,3 % |

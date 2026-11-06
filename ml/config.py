@@ -136,7 +136,7 @@ TAILLE_DEFAUT = "S"
 
 HYPERPARAMS = {
     "learning_rate":  1e-3,   # valeur standard d'Adam, stable sur un petit MLP
-    "batch_size":     256,    # ~250 lots par époque : rapide et gradient peu bruité
+    "batch_size":     256,    # ~210 lots par époque : rapide et gradient peu bruité
     "epochs_max":     150,    # plafond : l'early stopping arrête bien avant
     "patience":       12,     # époques sans progrès (val_loss) avant arrêt
     "dropout":        0.1,    # régularisation légère (petit réseau, beaucoup de données)
