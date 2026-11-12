@@ -56,7 +56,7 @@ le modèle d'IA). En mode développement, le débogueur charge Appli directement
 Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 
 ```c
-#define DEMO_PARTIE        3
+#define DEMO_PARTIE        4
 ```
 
 | Valeur | Ce qui tourne | LEDs |
@@ -64,6 +64,18 @@ Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 | `1` | 3 LEDs allumées 3 s, puis chenillard rouge → vert → bleu (3 s), logs `<ROUGE>`… | toutes |
 | `2` | Lecture des 3 capteurs toutes les 5 s | rouge = lecture, vert = en attente |
 | `3` | Capteurs + réseau : DHCP, ping google.com toutes les 10 s | + bleu = communication réseau |
+| `4` | Capteurs + envoi des mesures sur ThingSpeak toutes les 20 s (TP3.2) | + bleu = communication réseau |
+
+**Démo 4 : clé ThingSpeak.** Copier `Appli/Core/Inc/secrets_exemple.h` en
+`Appli/Core/Inc/secrets.h` et y mettre la *Write API Key* du canal.
+`secrets.h` est exclu du dépôt (`.gitignore`) : la clé ne doit jamais être
+publiée. Sans ce fichier, la compilation s'arrête avec un message explicite.
+
+Canal ThingSpeak : `field1` = température (°C, SHT40), `field2` = humidité (%),
+`field3` = pression mesurée par la carte (hPa, non corrigée de l'altitude).
+Sans box, la carte peut être branchée sur le port Ethernet d'un PC Windows qui
+partage sa connexion Wi-Fi (*Partage de connexion Internet* : la carte reçoit
+une adresse `192.168.137.x`).
 
 Les messages de plusieurs tâches ne se mélangent pas sur la console : chaque bloc
 de `printf` est protégé par un mutex (`console.c`).

@@ -2,13 +2,18 @@
 /**
   ******************************************************************************
   * File Name          : app_freertos.c
-  * Description        : Tâches FreeRTOS de l'application (TP2).
+  * Description        : Tâches FreeRTOS de l'application (TP2, TP3).
   *
   *   DEMO_PARTIE choisit ce qui tourne, pour pouvoir montrer chaque partie
   *   du TP en démonstration en changeant une seule ligne :
   *     1 -> TacheChenillard : 3 LEDs allumées 3 s, puis chenillard R/V/B (3 s)
   *     2 -> TacheCapteurs   : lecture des capteurs, LED rouge/verte
   *     3 -> TacheCapteurs + TacheReseau : + LwIP, ping google.com, LED bleue
+  *     4 -> TacheCapteurs + TacheReseau : envoi des mesures sur ThingSpeak
+  *          toutes les 20 s (TP3.2), LED bleue
+  *
+  *   Les deux tâches se partagent les dernières mesures par une "boîte aux
+  *   lettres" protégée par un mutex (mesures_publier / mesures_lire).
   *
   *   Une LED = un seul propriétaire (pas de conflit entre tâches) :
   *     rouge/verte -> TacheCapteurs (ou TacheChenillard en démo 1)
@@ -39,6 +44,7 @@
 #include "app_ethernet.h"
 #include "net_ping.h"
 #include "console.h"
+#include "thingspeak.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +55,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* ===== Choix de la démo (voir l'en-tête du fichier) ===== */
-#define DEMO_PARTIE        3
+#define DEMO_PARTIE        4
 
 #define CHENILLARD_MS      3000U   /* partie 1 : temporisation imposée de 3 s     */
 #define SENSOR_PERIOD_MS   5000U   /* partie 2 : une lecture des capteurs / 5 s   */
@@ -57,9 +63,21 @@
 #define PING_HOTE          "google.com"
 #define PING_PERIOD_MS     10000U  /* partie 3 : un ping toutes les 10 s          */
 #define PING_TIMEOUT_MS    2000U   /* attente maximum de la réponse               */
+#define TS_PERIOD_MS       20000U  /* TP3.2 : un envoi ThingSpeak toutes les 20 s
+                                      (compte gratuit : 15 s minimum)            */
 
-#if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 3)
-#error "DEMO_PARTIE doit valoir 1, 2 ou 3"
+#if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 4)
+#error "DEMO_PARTIE doit valoir 1, 2, 3 ou 4"
+#endif
+
+/* La clé API ThingSpeak est dans secrets.h, absent de GitHub (.gitignore).
+ * __has_include permet d'afficher un message clair s'il manque. */
+#if (DEMO_PARTIE == 4)
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Copier Core/Inc/secrets_exemple.h en Core/Inc/secrets.h et y mettre la Write API Key ThingSpeak"
+#endif
 #endif
 /* USER CODE END PD */
 
@@ -103,6 +121,14 @@ const osThreadAttr_t TacheReseau_attributes = {
 
 static sensors_data_t s_data;
 
+/* Boîte aux lettres : dernières mesures lues par TacheCapteurs, utilisées
+ * par TacheReseau. Deux tâches touchent à la même variable : sans mutex,
+ * TacheReseau pourrait lire une structure à moitié mise à jour (la
+ * température de la nouvelle mesure avec l'humidité de l'ancienne). */
+static sensors_data_t s_derniere_mesure;
+static bool           s_mesure_dispo = false;
+static osMutexId_t    s_mesures_mutex = NULL;
+
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -118,6 +144,8 @@ void TacheChenillard(void *argument);
 void TacheCapteurs(void *argument);
 void TacheReseau(void *argument);
 static void log_etat(const char *etat);
+static void mesures_publier(const sensors_data_t *m);
+__attribute__((unused)) static bool mesures_lire(sensors_data_t *m);  /* démo 4 seulement */
 /* USER CODE END FunctionPrototypes */
 
 /**
@@ -132,7 +160,9 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* Mutex de la console : plusieurs tâches font des printf (console.c) */
-  console_init();/* USER CODE END RTOS_MUTEX */
+  console_init();
+  /* Mutex de la boîte aux lettres des mesures */
+  s_mesures_mutex = osMutexNew(NULL);/* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -161,7 +191,7 @@ void MX_FREERTOS_Init(void) {
   TacheCapteursHandle = osThreadNew(TacheCapteurs, NULL, &TacheCapteurs_attributes);
   ok = (TacheCapteursHandle != NULL);
 #endif
-#if (DEMO_PARTIE == 3)
+#if (DEMO_PARTIE >= 3)
   TacheReseauHandle = osThreadNew(TacheReseau, NULL, &TacheReseau_attributes);
   ok = ok && (TacheReseauHandle != NULL);
 #endif
@@ -169,7 +199,11 @@ void MX_FREERTOS_Init(void) {
   {
     printf("ERREUR : creation des taches impossible (tas FreeRTOS trop petit ?)\r\n");
   }
-  printf("  Demo : partie %d du TP2\r\n", DEMO_PARTIE);/* USER CODE END RTOS_THREADS */
+#if (DEMO_PARTIE == 4)
+  printf("  Demo : TP3.2, envoi des mesures sur ThingSpeak\r\n");
+#else
+  printf("  Demo : partie %d du TP2\r\n", DEMO_PARTIE);
+#endif/* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
@@ -208,6 +242,29 @@ static void log_etat(const char *etat)
   console_lock();
   printf("[%8lu ms] <%s>\r\n", (unsigned long)osKernelGetTickCount(), etat);
   console_unlock();
+}
+
+/* Dépose une copie des mesures dans la boîte aux lettres */
+static void mesures_publier(const sensors_data_t *m)
+{
+  osMutexAcquire(s_mesures_mutex, osWaitForever);
+  s_derniere_mesure = *m;             /* copie de toute la structure */
+  s_mesure_dispo = true;
+  osMutexRelease(s_mesures_mutex);
+}
+
+/* Récupère une copie des dernières mesures. false s'il n'y en a pas encore. */
+static bool mesures_lire(sensors_data_t *m)
+{
+  bool dispo;
+  osMutexAcquire(s_mesures_mutex, osWaitForever);
+  dispo = s_mesure_dispo;
+  if (dispo)
+  {
+    *m = s_derniere_mesure;
+  }
+  osMutexRelease(s_mesures_mutex);
+  return dispo;
 }
 
 /* ========================================================================= */
@@ -274,6 +331,7 @@ void TacheCapteurs(void *argument)
     led_off(LED_ID_GREEN);
     led_on(LED_ID_RED);                 /* ROUGE : lecture en cours */
     sensors_read(&s_data);
+    mesures_publier(&s_data);           /* pour TacheReseau (ThingSpeak) */
 
     console_lock();                     /* le log et les 3 lignes de mesures ensemble */
     printf("[%8lu ms] <Lecture Interface Capteurs>\r\n", (unsigned long)osKernelGetTickCount());
@@ -290,11 +348,74 @@ void TacheCapteurs(void *argument)
 }
 
 /* ========================================================================= */
-/* Partie 3 : réseau                                                         */
+/* Partie 3 : réseau (TP2 : ping) et TP3.2 : envoi sur ThingSpeak          */
 /* ========================================================================= */
+#if (DEMO_PARTIE == 3)
+/* TP2 partie 3 : ping google.com, affiche le résultat */
+static void reseau_action(void)
+{
+  char ip[16] = "?";
+  uint32_t rtt = 0;
+
+  /* Le ping peut prendre jusqu'à 2 s : on ne garde PAS la console pendant
+   * ce temps, sinon TacheCapteurs serait bloquée pour afficher. */
+  ping_resultat_t r = net_ping(PING_HOTE, PING_TIMEOUT_MS, ip, &rtt);
+
+  console_lock();
+  if (r == PING_OK)
+  {
+    printf("  ping %s (%s) : reponse en %lu ms\r\n", PING_HOTE, ip, (unsigned long)rtt);
+  }
+  else
+  {
+    printf("  ping %s (%s) : %s\r\n", PING_HOTE, ip, net_ping_texte(r));
+  }
+  console_unlock();
+}
+#define RESEAU_PERIODE_MS  PING_PERIOD_MS
+
+#elif (DEMO_PARTIE == 4)
+/* TP3.2 : envoie les dernières mesures sur le canal ThingSpeak */
+static void reseau_action(void)
+{
+  sensors_data_t m;
+
+  if (!mesures_lire(&m) || !m.humidity_ok || !m.pressure_ok)
+  {
+    log_etat("ThingSpeak : pas encore de mesure valide, envoi reporte");
+    return;
+  }
+
+  /* Température du SHT40 : c'est le même capteur que l'humidité, donc le
+   * point de rosée calculé dans le cloud sera cohérent. La pression est
+   * envoyée brute (au niveau de la carte) : c'est MATLAB qui la ramènera
+   * au niveau de la mer. */
+  int32_t numero = 0;
+  uint32_t t0 = osKernelGetTickCount();
+  ts_resultat_t r = thingspeak_envoyer(THINGSPEAK_WRITE_KEY, m.temp_hum_c,
+                                       m.humidity_rh, m.pressure_hpa, &numero);
+  uint32_t duree = osKernelGetTickCount() - t0;
+
+  console_lock();
+  if (r == TS_OK)
+  {
+    printf("  ThingSpeak : ligne %ld enregistree (%lu ms)\r\n",
+           (long)numero, (unsigned long)duree);
+  }
+  else
+  {
+    printf("  ThingSpeak : %s (%lu ms)\r\n", thingspeak_texte(r), (unsigned long)duree);
+  }
+  console_unlock();
+}
+#define RESEAU_PERIODE_MS  TS_PERIOD_MS
+#endif
+
+#if (DEMO_PARTIE >= 3)
 /**
-  * @brief  Démarre LwIP, attend l'IP du DHCP, puis ping google.com toutes
-  *         les 10 s. LED bleue = communication réseau en cours (3.d).
+  * @brief  Démarre LwIP, attend l'IP du DHCP, puis fait l'action réseau de
+  *         la démo (ping ou ThingSpeak) à intervalle régulier.
+  *         LED bleue = communication réseau en cours (TP2 3.d).
   */
 void TacheReseau(void *argument)
 {
@@ -302,7 +423,7 @@ void TacheReseau(void *argument)
 
   reseau_init();                       /* LwIP + Ethernet + DHCP (app_ethernet.c) */
 
-  if (!reseau_attendre_ip(30000))      /* 30 s pour que la box donne une IP */
+  if (!reseau_attendre_ip(30000))      /* 30 s pour obtenir une IP */
   {
     log_etat("Communication Reseau : pas d'IP pour l'instant, on reessaiera");
   }
@@ -311,26 +432,9 @@ void TacheReseau(void *argument)
   {
     if (reseau_est_pret())
     {
-      char ip[16] = "?";
-      uint32_t rtt = 0;
-
       led_on(LED_ID_BLUE);                         /* BLEU : communication réseau */
       log_etat("Communication Reseau");
-
-      /* Le ping peut prendre jusqu'à 2 s : on ne garde PAS la console pendant
-       * ce temps, sinon TacheCapteurs serait bloquée pour afficher. */
-      ping_resultat_t r = net_ping(PING_HOTE, PING_TIMEOUT_MS, ip, &rtt);
-
-      console_lock();
-      if (r == PING_OK)
-      {
-        printf("  ping %s (%s) : reponse en %lu ms\r\n", PING_HOTE, ip, (unsigned long)rtt);
-      }
-      else
-      {
-        printf("  ping %s (%s) : %s\r\n", PING_HOTE, ip, net_ping_texte(r));
-      }
-      console_unlock();
+      reseau_action();
       led_off(LED_ID_BLUE);
     }
     else
@@ -338,9 +442,10 @@ void TacheReseau(void *argument)
       log_etat("Communication Reseau : reseau pas pret (cable ? DHCP ?)");
     }
 
-    osDelay(PING_PERIOD_MS);
+    osDelay(RESEAU_PERIODE_MS);
   }
 }
+#endif
 
 /* USER CODE END Application */
 
