@@ -1,35 +1,39 @@
 /**
   ******************************************************************************
   * @file    thingspeak.c
-  * @brief   Envoi des mesures sur un canal ThingSpeak (API REST, HTTP).
-  *          TP3 partie 2.
+  * @brief   Échanges avec ThingSpeak par son API REST (HTTP). TP3 partie 2.
   *
-  * La carte fait exactement ce que fait un navigateur quand on colle
+  *   - thingspeak_envoyer()       : ajoute les mesures au canal
+  *   - thingspeak_talkback_lire() : récupère la prédiction déposée par MATLAB
+  *                                  dans la file TalkBack
+  *
+  * Les deux font exactement ce que fait un navigateur avec une adresse du type
   *   http://api.thingspeak.com/update?api_key=CLE&field1=21.6&field2=58.3&field3=988.1
-  * dans la barre d'adresse :
   *
   *   1. DNS   : "api.thingspeak.com" -> adresse IP (comme pour le ping)
   *   2. TCP   : connexion au port 80 du serveur (socket SOCK_STREAM)
   *   3. HTTP  : envoi de la requête, un simple texte :
-  *                GET /update?api_key=...&field1=...&field2=...&field3=... HTTP/1.0
+  *                GET /update?api_key=...&field1=... HTTP/1.0
   *                Host: api.thingspeak.com
   *                (ligne vide)
-  *   4. Réponse : le serveur renvoie des en-têtes puis, après une ligne vide,
-  *                le numéro de la ligne créée ("0" = refusé).
+  *   4. Réponse : des en-têtes puis, après une ligne vide, le corps :
+  *                - /update : le numéro de la ligne créée ("0" = refusé)
+  *                - TalkBack : le texte de la commande (vide si file vide)
   *
   * HTTP/1.0 plutôt que 1.1 : le serveur ferme la connexion après sa réponse
   * et n'utilise pas l'encodage "chunked" ; on lit donc tout jusqu'à la
   * fermeture et la réponse est simple à analyser.
   *
   * HTTP et non HTTPS : le chiffrement TLS (mbedTLS) demanderait beaucoup de
-  * mémoire et de configuration. En contrepartie, la clé API circule en clair
-  * sur le réseau : acceptable pour un TP, pas pour un produit.
+  * mémoire et de configuration. En contrepartie, les clés API circulent en
+  * clair sur le réseau : acceptable pour un TP, pas pour un produit.
   ******************************************************************************
   */
 #include "thingspeak.h"
 #include "lwip/opt.h"
 #include "lwip/sockets.h"
 #include "lwip/api.h"          /* netconn_gethostbyname : requête DNS */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,7 +43,7 @@
 #define TS_TIMEOUT_MS  5000U    /* attente maximum pour envoyer / recevoir */
 
 /* Tampons statiques : ils seraient trop gros pour la pile de la tâche. Une
- * seule tâche (TacheReseau) appelle thingspeak_envoyer : pas de conflit. */
+ * seule tâche (TacheReseau) utilise ce module : pas de conflit. */
 static char s_requete[256];
 static char s_reponse[1024];
 
@@ -54,6 +58,7 @@ const char *thingspeak_texte(ts_resultat_t r)
     case TS_ERR_ENVOI:     return "echec envoi de la requete";
     case TS_ERR_REPONSE:   return "pas de reponse ou reponse illisible";
     case TS_ERR_REFUS:     return "refuse par ThingSpeak (cle API ? envoi trop rapproche ?)";
+    case TS_VIDE:          return "aucune commande en attente";
     default:               return "?";
   }
 }
@@ -72,26 +77,24 @@ static void flottant_texte(float v, char *buf, size_t len)
   snprintf(buf, len, "%s%ld.%02ld", signe, (long)(centi / 100), (long)(centi % 100));
 }
 
-ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
-                                 float temp_c, float humidite_rh,
-                                 float pression_hpa, int32_t *numero)
+/**
+  * Fait une requête "GET chemin" et renvoie le corps de la réponse.
+  * s_requete doit déjà contenir la requête complète (n octets).
+  * @param corps  reçoit un pointeur vers le corps (dans s_reponse)
+  */
+static ts_resultat_t http_get(int n, const char **corps)
 {
   ip_addr_t serveur;
   int s;
-  ts_resultat_t res;
 
-  /* ---------------------------------------------------------------------
-   * 1. DNS : nom -> adresse IP
-   * ------------------------------------------------------------------- */
+  /* --- 1. DNS : nom -> adresse IP -------------------------------------- */
   if (netconn_gethostbyname(TS_HOTE, &serveur) != ERR_OK)
   {
     return TS_ERR_DNS;
   }
 
-  /* ---------------------------------------------------------------------
-   * 2. Socket TCP (SOCK_STREAM) avec délais d'envoi et de réception :
-   *    sans eux, un serveur muet bloquerait la tâche indéfiniment.
-   * ------------------------------------------------------------------- */
+  /* --- 2. Socket TCP (SOCK_STREAM) avec délais d'envoi et de réception :
+   *        sans eux, un serveur muet bloquerait la tâche indéfiniment. --- */
   s = socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0)
   {
@@ -116,27 +119,7 @@ ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
     return TS_ERR_CONNEXION;
   }
 
-  /* ---------------------------------------------------------------------
-   * 3. Requête HTTP. Chaque ligne se termine par "\r\n" ; une ligne vide
-   *    marque la fin des en-têtes.
-   * ------------------------------------------------------------------- */
-  char t[16], h[16], p[16];
-  flottant_texte(temp_c, t, sizeof(t));
-  flottant_texte(humidite_rh, h, sizeof(h));
-  flottant_texte(pression_hpa, p, sizeof(p));
-
-  int n = snprintf(s_requete, sizeof(s_requete),
-                   "GET /update?api_key=%s&field1=%s&field2=%s&field3=%s HTTP/1.0\r\n"
-                   "Host: " TS_HOTE "\r\n"
-                   "\r\n",
-                   cle_ecriture, t, h, p);
-  if ((n <= 0) || (n >= (int)sizeof(s_requete)))
-  {
-    closesocket(s);
-    return TS_ERR_ENVOI;
-  }
-
-  /* send() peut n'envoyer qu'une partie : on boucle jusqu'au bout */
+  /* --- 3. Envoi : send() peut n'envoyer qu'une partie, on boucle -------- */
   for (int envoye = 0; envoye < n; )
   {
     int r = send(s, s_requete + envoye, (size_t)(n - envoye), 0);
@@ -148,15 +131,13 @@ ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
     envoye += r;
   }
 
-  /* ---------------------------------------------------------------------
-   * 4. Réponse : on lit jusqu'à ce que le serveur ferme (recv renvoie 0)
-   *    ou que le tampon soit plein. Exemple de réponse :
-   *      HTTP/1.1 200 OK
-   *      Content-Type: text/plain; charset=utf-8
-   *      ...
-   *      (ligne vide)
-   *      42                 <- numéro de la ligne créée, 0 si refusé
-   * ------------------------------------------------------------------- */
+  /* --- 4. Réponse : on lit jusqu'à ce que le serveur ferme (recv renvoie
+   *        0) ou que le tampon soit plein. Exemple :
+   *          HTTP/1.1 200 OK
+   *          Content-Type: text/plain; charset=utf-8
+   *          ...
+   *          (ligne vide)
+   *          42                 <- le corps                              */
   int total = 0;
   for (;;)
   {
@@ -174,19 +155,94 @@ ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
   closesocket(s);
   s_reponse[total] = '\0';
 
-  /* Ligne de statut : "HTTP/1.x 200 ..." */
-  const char *corps = strstr(s_reponse, "\r\n\r\n");
+  /* Ligne de statut "HTTP/1.x 200 ..." puis ligne vide avant le corps */
+  const char *fin_entetes = strstr(s_reponse, "\r\n\r\n");
   if ((total == 0) || (strncmp(s_reponse, "HTTP/1.", 7) != 0) ||
-      (strncmp(s_reponse + 9, "200", 3) != 0) || (corps == NULL))
+      (strncmp(s_reponse + 9, "200", 3) != 0) || (fin_entetes == NULL))
   {
     return TS_ERR_REPONSE;
   }
+  *corps = fin_entetes + 4;
+  return TS_OK;
+}
 
-  long num = strtol(corps + 4, NULL, 10);
+ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
+                                 float temp_c, float humidite_rh,
+                                 float pression_hpa, int32_t *numero)
+{
+  char t[16], h[16], p[16];
+  flottant_texte(temp_c, t, sizeof(t));
+  flottant_texte(humidite_rh, h, sizeof(h));
+  flottant_texte(pression_hpa, p, sizeof(p));
+
+  /* Chaque ligne se termine par "\r\n" ; une ligne vide marque la fin */
+  int n = snprintf(s_requete, sizeof(s_requete),
+                   "GET /update?api_key=%s&field1=%s&field2=%s&field3=%s HTTP/1.0\r\n"
+                   "Host: " TS_HOTE "\r\n"
+                   "\r\n",
+                   cle_ecriture, t, h, p);
+  if ((n <= 0) || (n >= (int)sizeof(s_requete)))
+  {
+    return TS_ERR_ENVOI;
+  }
+
+  const char *corps;
+  ts_resultat_t r = http_get(n, &corps);
+  if (r != TS_OK)
+  {
+    return r;
+  }
+
+  long num = strtol(corps, NULL, 10);    /* numéro de la ligne, 0 = refusé */
   if (numero != NULL)
   {
     *numero = (int32_t)num;
   }
-  res = (num > 0) ? TS_OK : TS_ERR_REFUS;
-  return res;
+  return (num > 0) ? TS_OK : TS_ERR_REFUS;
+}
+
+ts_resultat_t thingspeak_talkback_lire(const char *id, const char *cle,
+                                       char *commande, size_t taille)
+{
+  /* "execute" renvoie la plus ancienne commande de la file et la retire.
+   * Sans extension (.json / .xml), la réponse est le texte brut. */
+  int n = snprintf(s_requete, sizeof(s_requete),
+                   "GET /talkbacks/%s/commands/execute?api_key=%s HTTP/1.0\r\n"
+                   "Host: " TS_HOTE "\r\n"
+                   "\r\n",
+                   id, cle);
+  if ((n <= 0) || (n >= (int)sizeof(s_requete)))
+  {
+    return TS_ERR_ENVOI;
+  }
+
+  const char *corps;
+  ts_resultat_t r = http_get(n, &corps);
+  if (r != TS_OK)
+  {
+    return r;
+  }
+
+  /* Copie du corps sans les espaces / retours à la ligne de début et fin */
+  while (isspace((unsigned char)*corps))
+  {
+    corps++;
+  }
+  size_t len = strlen(corps);
+  while ((len > 0U) && isspace((unsigned char)corps[len - 1U]))
+  {
+    len--;
+  }
+  if (len == 0U)
+  {
+    commande[0] = '\0';
+    return TS_VIDE;                    /* file vide : pas encore de réponse */
+  }
+  if (len >= taille)
+  {
+    len = taille - 1U;
+  }
+  memcpy(commande, corps, len);
+  commande[len] = '\0';
+  return TS_OK;
 }

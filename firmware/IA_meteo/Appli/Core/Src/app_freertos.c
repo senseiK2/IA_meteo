@@ -10,7 +10,8 @@
   *     2 -> TacheCapteurs   : lecture des capteurs, LED rouge/verte
   *     3 -> TacheCapteurs + TacheReseau : + LwIP, ping google.com, LED bleue
   *     4 -> TacheCapteurs + TacheReseau : envoi des mesures sur ThingSpeak
-  *          toutes les 20 s (TP3.2), LED bleue
+  *          toutes les 20 s, puis attente de la prédiction calculée par
+  *          MATLAB dans le cloud et renvoyée par TalkBack (TP3.2), LED bleue
   *
   *   Les deux tâches se partagent les dernières mesures par une "boîte aux
   *   lettres" protégée par un mutex (mesures_publier / mesures_lire).
@@ -65,6 +66,8 @@
 #define PING_TIMEOUT_MS    2000U   /* attente maximum de la réponse               */
 #define TS_PERIOD_MS       20000U  /* TP3.2 : un envoi ThingSpeak toutes les 20 s
                                       (compte gratuit : 15 s minimum)            */
+#define TB_SCRUTATION_MS   2000U   /* TalkBack : on regarde la file toutes les 2 s */
+#define TB_ATTENTE_MAX_MS  30000U  /* ... pendant 30 s au plus après l'envoi      */
 
 #if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 4)
 #error "DEMO_PARTIE doit valoir 1, 2, 3 ou 4"
@@ -76,7 +79,10 @@
 #if __has_include("secrets.h")
 #include "secrets.h"
 #else
-#error "Copier Core/Inc/secrets_exemple.h en Core/Inc/secrets.h et y mettre la Write API Key ThingSpeak"
+#error "Copier Core/Inc/secrets_exemple.h en Core/Inc/secrets.h et y mettre les cles ThingSpeak"
+#endif
+#if !defined(TALKBACK_ID) || !defined(TALKBACK_KEY)
+#error "Ajouter TALKBACK_ID et TALKBACK_KEY dans Core/Inc/secrets.h (voir secrets_exemple.h)"
 #endif
 #endif
 /* USER CODE END PD */
@@ -375,10 +381,20 @@ static void reseau_action(void)
 #define RESEAU_PERIODE_MS  PING_PERIOD_MS
 
 #elif (DEMO_PARTIE == 4)
-/* TP3.2 : envoie les dernières mesures sur le canal ThingSpeak */
+/* TP3.2 : envoie les dernières mesures sur le canal ThingSpeak, puis attend
+ * la prédiction que MATLAB dépose dans la file TalkBack.
+ *
+ *   carte --mesures--> canal --(React)--> MATLAB --commande--> TalkBack
+ *     ^                                                           |
+ *     +--------------------- lecture toutes les 2 s --------------+
+ *
+ * Le temps entre l'envoi et la réception est la latence de l'inférence dans
+ * le cloud (réseau + déclenchement + MATLAB), à comparer au TP3.3 avec
+ * l'inférence sur la carte. Précision : la période de scrutation (2 s). */
 static void reseau_action(void)
 {
   sensors_data_t m;
+  static char commande[128];
 
   if (!mesures_lire(&m) || !m.humidity_ok || !m.pressure_ok)
   {
@@ -386,10 +402,20 @@ static void reseau_action(void)
     return;
   }
 
-  /* Température du SHT40 : c'est le même capteur que l'humidité, donc le
-   * point de rosée calculé dans le cloud sera cohérent. La pression est
-   * envoyée brute (au niveau de la carte) : c'est MATLAB qui la ramènera
-   * au niveau de la mer. */
+  /* 1. Vider la file : une ancienne réponse (carte éteinte, envoi précédent
+   *    sans réponse à temps...) serait prise pour la réponse à CET envoi. */
+  for (int i = 0; i < 10; i++)
+  {
+    if (thingspeak_talkback_lire(TALKBACK_ID, TALKBACK_KEY,
+                                 commande, sizeof(commande)) != TS_OK)
+    {
+      break;
+    }
+  }
+
+  /* 2. Envoi des mesures. Température du SHT40 : même capteur que
+   *    l'humidité, donc point de rosée cohérent. Pression brute : MATLAB la
+   *    ramène au niveau de la mer. */
   int32_t numero = 0;
   uint32_t t0 = osKernelGetTickCount();
   ts_resultat_t r = thingspeak_envoyer(THINGSPEAK_WRITE_KEY, m.temp_hum_c,
@@ -407,6 +433,35 @@ static void reseau_action(void)
     printf("  ThingSpeak : %s (%lu ms)\r\n", thingspeak_texte(r), (unsigned long)duree);
   }
   console_unlock();
+  if (r != TS_OK)
+  {
+    return;
+  }
+
+  /* 3. Attente de la prédiction du cloud */
+  while ((osKernelGetTickCount() - t0) < TB_ATTENTE_MAX_MS)
+  {
+    osDelay(TB_SCRUTATION_MS);
+    r = thingspeak_talkback_lire(TALKBACK_ID, TALKBACK_KEY, commande, sizeof(commande));
+    if (r == TS_VIDE)
+    {
+      continue;                        /* MATLAB n'a pas encore répondu */
+    }
+
+    console_lock();
+    if (r == TS_OK)
+    {
+      printf("  Prediction cloud : %s (recue %lu ms apres l'envoi)\r\n",
+             commande, (unsigned long)(osKernelGetTickCount() - t0));
+    }
+    else
+    {
+      printf("  TalkBack : %s\r\n", thingspeak_texte(r));
+    }
+    console_unlock();
+    return;
+  }
+  log_etat("TalkBack : pas de prediction recue en 30 s (MATLAB lance ?)");
 }
 #define RESEAU_PERIODE_MS  TS_PERIOD_MS
 #endif
