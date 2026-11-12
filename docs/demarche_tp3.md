@@ -299,3 +299,57 @@ Deux difficultés rencontrées avec TensorFlow récent (Keras 3) :
 - la quantification int8 échoue sur les variables Keras (`READ_VARIABLE`) : le
   réseau est réécrit en fonction TensorFlow à poids constants avant
   conversion.
+
+---
+
+## 8. Inférence dans le cloud (TP3.2)
+
+### Chaîne mise en place
+
+```
+carte ──HTTP GET /update──► canal ThingSpeak ──React──► MATLAB Analysis
+  ▲                          (field1..3)        (à chaque     │ modèles ONNX h0, h3
+  │                                              mesure)       ▼
+  └──── HTTP GET /talkbacks/<id>/commands/execute ◄──── file TalkBack
+```
+
+| Élément | Rôle | Fichier |
+|---|---|---|
+| Carte (démo 4) | Envoie température, humidité, pression brute toutes les 20 s ; scrute TalkBack toutes les 2 s | `Appli/Core/Src/thingspeak.c`, `app_freertos.c` |
+| Canal ThingSpeak | Stocke les mesures (`field1` à `field3`) | – |
+| React | Lance l'analyse MATLAB à chaque nouvelle mesure | – |
+| MATLAB Analysis | Lit la dernière mesure, calcule les 8 entrées, exécute les modèles ONNX, dépose la réponse dans TalkBack | `matlab/prediction_meteo.m` |
+| TalkBack | File de commandes : la carte, derrière un NAT, ne peut pas être appelée ; c'est elle qui vient chercher la réponse | – |
+
+Format de la réponse : `h0=<classe>,<confiance %>;h3=<classe>,<confiance %>`.
+
+### Choix techniques
+
+- **Calcul des entrées dans le cloud** : la carte n'envoie que ses trois mesures
+  brutes ; MATLAB calcule la pression au niveau de la mer, le point de rosée,
+  l'heure et la saison avec les formules de `ml/meteo_features.py`.
+- **Modèle lu sur GitHub** : MATLAB télécharge le `.onnx` et le `.json` du dépôt
+  public, donc un modèle réentraîné et poussé est utilisé sans autre
+  modification. `importNetworkFromONNX` nécessite `InputDataFormats = 'BC'`
+  (batch, canaux) pour initialiser le réseau.
+- **Validation** : sur un vecteur de test, MATLAB retrouve les probabilités
+  calculées par Python (`matlab/test_onnx.m`).
+- **HTTP sans TLS** : la pile TLS (mbedTLS) serait coûteuse en mémoire ; les
+  clés API circulent donc en clair. Elles sont stockées dans `secrets.h`, exclu
+  du dépôt.
+
+### Latence mesurée
+
+Temps entre l'envoi des mesures par la carte et la réception de la prédiction :
+environ **7 à 9 s** (premier essai : 9,2 s ; résolution de 2 s due à la
+scrutation de TalkBack). L'envoi HTTP lui-même prend environ 0,25 s : la
+majeure partie du délai vient du déclenchement par React et de l'exécution de
+MATLAB (téléchargement et import des deux modèles ONNX à chaque exécution).
+
+### Limite observée
+
+La carte est à l'intérieur : 27,7 °C et 50 % d'humidité un jour de novembre
+sont hors de la distribution d'apprentissage (mesures extérieures). La
+prédiction « Précipitations » s'est révélée juste (il pleuvait), principalement
+grâce à la pression basse (≈ 992 hPa au niveau de la mer), seule grandeur non
+faussée par l'intérieur.

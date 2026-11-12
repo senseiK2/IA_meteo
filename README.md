@@ -36,7 +36,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 - [x] TP2.3 – Ping vers google.com (DNS + ICMP par socket RAW) + LED bleue
 - [x] TP3.1 – Pipeline d'entraînement (Meteostat → TensorFlow → ONNX / TFLite), étude du compromis
 - [x] TP3.1 – Étude du compromis, choix et export des modèles (ONNX, TFLite float32 / int8)
-- [ ] TP3.2 – Inférence MATLAB sur ThingSpeak + TalkBack
+- [x] TP3.2 – Inférence MATLAB sur ThingSpeak, déclenchée par React, réponse par TalkBack
 - [ ] TP3.3 – Inférence sur le STM32N6 (X-CUBE-AI), comparaison cloud / edge, consommation
 
 ## Lancer le firmware
