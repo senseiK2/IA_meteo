@@ -353,3 +353,12 @@ sont hors de la distribution d'apprentissage (mesures extérieures). La
 prédiction « Précipitations » s'est révélée juste (il pleuvait), principalement
 grâce à la pression basse (≈ 992 hPa au niveau de la mer), seule grandeur non
 faussée par l'intérieur.
+
+Le lendemain, carte toujours à l'intérieur (23,9 °C, 44 % d'humidité, pression
+normale ≈ 1010 hPa au niveau de la mer), le modèle a prédit « Clair » (41 %)
+par temps nuageux : le chauffage assèche l'air de la pièce (de l'air extérieur
+à 8 °C et 85 % ne fait plus qu'environ 35 % une fois chauffé à 24 °C), et le
+modèle interprète cet air sec comme un ciel dégagé. **Carte placée dehors**,
+la prédiction est devenue correcte. Le capteur doit donc être installé à
+l'extérieur, à l'abri du soleil, comme une station météo : un modèle n'est
+fiable que sur des entrées comparables à celles de son apprentissage.
