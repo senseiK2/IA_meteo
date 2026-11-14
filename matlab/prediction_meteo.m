@@ -11,17 +11,27 @@
 %      affiche le résultat ;
 %   4. dépose la prédiction dans la file TalkBack, où la carte vient la
 %      chercher, sous la forme "h0=Nuageux,64;h3=Precipitations,55"
-%      (classe et confiance en %, maintenant et dans 3 h).
+%      (classe et confiance en %, maintenant et dans 3 h) ;
+%   5. enregistre la prédiction dans un 2e canal (TP3_Meteo_Cloud), pour la
+%      page web de suivi (web/index.html) :
+%        field1 / field2 : classe h0 (0..3) et confiance (%)
+%        field3 / field4 : classe h3 (0..3) et confiance (%)
+%        field5          : numéro de la mesure traitée (entry_id du canal 1)
+%        field6          : durée d'exécution de ce script MATLAB (s)
 
 % ---------------------------------------------------------------------------
 % Réglages (page du canal : "Channel ID" ; onglet API Keys : "Read API Key" ;
 % Apps > TalkBack : identifiant et API Key de la TalkBack).
 % Ne pas publier les vraies clés sur GitHub.
 % ---------------------------------------------------------------------------
-channelID   = 0000000;             % <-- numéro du canal TP3_Meteo_STM32
-readKey     = 'XXXXXXXXXXXXXXXX';  % <-- Read API Key du canal
-talkbackID  = 00000;               % <-- identifiant de la TalkBack
-talkbackKey = 'XXXXXXXXXXXXXXXX';  % <-- API Key de la TalkBack
+channelID     = 0000000;             % <-- numéro du canal TP3_Meteo_STM32
+readKey       = 'XXXXXXXXXXXXXXXX';  % <-- Read API Key du canal
+talkbackID    = 00000;               % <-- identifiant de la TalkBack
+talkbackKey   = 'XXXXXXXXXXXXXXXX';  % <-- API Key de la TalkBack
+cloudChannel  = 0000000;             % <-- numéro du canal TP3_Meteo_Cloud
+cloudWriteKey = 'XXXXXXXXXXXXXXXX';  % <-- Write API Key du canal TP3_Meteo_Cloud
+
+debut = tic;                         % chronomètre : durée de l'exécution
 
 url  = 'https://raw.githubusercontent.com/senseiK2/IA_meteo/main/ml/models/export/';
 opts = weboptions('ContentType', 'json');   % GitHub sert le .json comme du texte
@@ -29,23 +39,28 @@ opts = weboptions('ContentType', 'json');   % GitHub sert le .json comme du text
 % ---------------------------------------------------------------------------
 % 1. Dernière mesure de la carte
 % ---------------------------------------------------------------------------
-mesure = thingSpeakRead(channelID, 'Fields', [1 2 3], 'NumPoints', 1, ...
-                        'ReadKey', readKey, 'OutputFormat', 'table');
-temp  = mesure{1, 2};              % colonne 1 = date, puis field1, 2, 3
-rh    = mesure{1, 3};
-p_brute = mesure{1, 4};
-fprintf('Mesure du %s : %.2f degC, %.1f %%, %.2f hPa\n', ...
-        string(mesure{1, 1}), temp, rh, p_brute);
+% API REST "feeds/last.json" plutôt que thingSpeakRead : elle donne aussi le
+% numéro de la mesure (entry_id), qui relie la prédiction du cloud à la
+% mesure et à la prédiction de la carte sur la page web.
+derniere = webread(sprintf('https://api.thingspeak.com/channels/%d/feeds/last.json', ...
+                           channelID), 'api_key', readKey, opts);
+temp    = str2double(derniere.field1);
+rh      = str2double(derniere.field2);
+p_brute = str2double(derniere.field3);
+fprintf('Mesure n°%d du %s : %.2f degC, %.1f %%, %.2f hPa\n', ...
+        derniere.entry_id, derniere.created_at, temp, rh, p_brute);
 
-% Heure UTC (le modèle a appris avec les heures UTC de Meteostat). La
-% mesure a au plus 20 s : l'heure d'exécution suffit à cette précision.
-maintenant = datetime('now', 'TimeZone', 'UTC');
+% Heure UTC de la mesure (le modèle a appris avec les heures UTC de
+% Meteostat ; ThingSpeak date chaque mesure en UTC, format ISO 8601).
+maintenant = datetime(derniere.created_at, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss''Z''', ...
+                      'TimeZone', 'UTC');
 
 % ---------------------------------------------------------------------------
 % 2. et 3. Prédiction avec les deux modèles
 % ---------------------------------------------------------------------------
 horizons   = [0 3];
 classes    = strings(size(horizons));      % classe prédite pour chaque horizon
+indices    = zeros(size(horizons));        % son numéro (0..3, comme sur la carte)
 confiances = zeros(size(horizons));        % probabilité de cette classe (%)
 for i = 1:numel(horizons)
     horizon = horizons(i);
@@ -65,6 +80,7 @@ for i = 1:numel(horizons)
     p = extractdata(predict(net, dlarray(single(x), 'BC')));
     [pmax, k] = max(p);
     classes(i)    = info.classes{k};
+    indices(i)    = k - 1;                 % MATLAB compte à partir de 1, le C de 0
     confiances(i) = round(100 * pmax);
 
     if horizon == 0
@@ -89,6 +105,19 @@ try
     fprintf('\nTalkBack : commande "%s" deposee\n', commande);
 catch err
     fprintf('\nTalkBack : echec (%s)\n', err.message);
+end
+
+% ---------------------------------------------------------------------------
+% 5. Historique des prédictions du cloud (canal TP3_Meteo_Cloud)
+% ---------------------------------------------------------------------------
+duree = toc(debut);
+try
+    thingSpeakWrite(cloudChannel, [indices(1), confiances(1), indices(2), ...
+                    confiances(2), derniere.entry_id, round(duree, 2)], ...
+                    'WriteKey', cloudWriteKey);
+    fprintf('Canal TP3_Meteo_Cloud : prediction enregistree (script : %.1f s)\n', duree);
+catch err
+    fprintf('Canal TP3_Meteo_Cloud : echec (%s)\n', err.message);
 end
 
 % ---------------------------------------------------------------------------
