@@ -391,6 +391,13 @@ Les 12 vecteurs de test exportés par `ml/04_exporter.py` (3 heures réelles de
 mêmes probabilités au dixième de pourcent près (vecteur 1 : 0,0 / 30,6 / 43,3
 / 26,1 % sur la carte ; 0,0 / 30,6 / 43,3 / 26,2 % en Python).
 
+**Modèle h3 (prévision à +3 h)** : généré de la même façon
+(`--name meteo_h3`), il partage la bibliothèque d'exécution de h0 ; seuls les
+poids et la normalisation diffèrent. Auto-test : **12 / 12** classes
+identiques à Python, et les 12 jeux de probabilités sont identiques à ceux de
+`vecteurs_test_h3.csv` au dixième de pourcent (ex. vecteur 1 : 0,1 / 35,4 /
+31,3 / 33,2 %), pour le même temps de calcul (≈ 49 000 cycles).
+
 ### Temps d'inférence
 
 | | Carte (Cortex-M55) | Cloud (ThingSpeak + MATLAB) |
@@ -422,6 +429,10 @@ Essai du 14/11/2026, environ 17 minutes de fonctionnement :
 La carte répond environ **12 000 à 15 000 fois plus vite**, avec exactement la
 même décision. Au premier cycle après le démarrage, la réponse du cloud n'est
 pas arrivée dans le délai de 30 s (premier lancement de MATLAB plus lent).
+
+Avec les deux modèles sur la carte, chaque mesure donne deux comparaisons (ex.
+h0 : Précipitations 70 %, h3 : Précipitations 90 %, identiques des deux
+côtés ; carte 741 µs et 765 µs, cloud 13,7 s pour les deux).
 
 **Conditions et limites de l'essai.** La carte était à l'intérieur, et pas sur
 le site de la station d'apprentissage (Chambéry-Aix, 235 m) : température et
