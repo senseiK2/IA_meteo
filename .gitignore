@@ -45,3 +45,7 @@ secrets.h
 .DS_Store
 Thumbs.db
 *.log
+
+# Sorties de travail de ST Edge AI (stedgeai)
+st_ai_ws/
+st_ai_output/
