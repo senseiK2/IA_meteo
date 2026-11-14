@@ -403,3 +403,32 @@ dans le cloud. Les 50 000 cycles pour 576 multiplications-additions viennent
 surtout du coût fixe du moteur d'exécution (préparation de chaque couche) et
 d'une configuration non optimisée : processeur à 64 MHz (le STM32N6 peut aller
 jusqu'à 800 MHz) et caches désactivés.
+
+### Comparaison carte / cloud sur les mêmes mesures (démo 6, question 3.3c)
+
+Pour chaque mesure, la carte calcule sa propre prédiction (heure UTC lue dans
+l'en-tête HTTP `Date:` de la réponse de ThingSpeak) puis attend celle du cloud
+(React → MATLAB → TalkBack) et compare les deux.
+
+Essai du 14/11/2026, environ 17 minutes de fonctionnement :
+
+| | Carte (X-CUBE-AI, Cortex-M55) | Cloud (ThingSpeak + MATLAB) |
+|---|---|---|
+| Classe prédite | identique au cloud pour **31 mesures sur 31** | – |
+| Confiance | identique (ex. Précipitations 71 % des deux côtés) | – |
+| Temps de réponse observé | **745 à 760 µs** | **9,2 à 11,4 s** |
+| Connexion Internet | non nécessaire | indispensable |
+
+La carte répond environ **12 000 à 15 000 fois plus vite**, avec exactement la
+même décision. Au premier cycle après le démarrage, la réponse du cloud n'est
+pas arrivée dans le délai de 30 s (premier lancement de MATLAB plus lent).
+
+**Conditions et limites de l'essai.** La carte était à l'intérieur, et pas sur
+le site de la station d'apprentissage (Chambéry-Aix, 235 m) : température et
+humidité de la pièce, altitude supposée de 235 m. Les prédictions ne décrivent
+donc pas le temps réel extérieur. Les mesures intérieures variant très peu, les
+31 comparaisons portent sur des entrées voisines (même classe à chaque fois) ;
+la concordance sur des situations variées est établie par l'auto-test (12
+heures réelles de 2025 couvrant les 4 classes, 12 / 12 identiques à Python,
+§ 9). L'essai démontre la **cohérence** des deux chaînes d'inférence et l'écart
+de temps de réponse, pas la justesse de la prévision.
