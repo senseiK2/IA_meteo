@@ -443,3 +443,96 @@ la concordance sur des situations variées est établie par l'auto-test (12
 heures réelles de 2025 couvrant les 4 classes, 12 / 12 identiques à Python,
 § 9). L'essai démontre la **cohérence** des deux chaînes d'inférence et l'écart
 de temps de réponse, pas la justesse de la prévision.
+
+---
+
+## 10. Consommation d'une prédiction : estimation théorique (question 3.3d)
+
+### Pourquoi une estimation et pas une mesure
+
+Sur la NUCLEO-N657X0-Q, le courant du cœur (VDDCORE) se mesure en **dessoudant
+une résistance de 0 Ω** (R40 en SMPS externe, configuration par défaut) et en
+lisant la tension aux bornes d'un shunt de 50 mΩ sur le connecteur CN12
+(manuel UM3417, § 7.4.4). Le même manuel signale un risque de dommage
+irréversible lié au courant d'appel dans cette configuration. De plus, une
+prédiction ne dure que 0,77 ms : il faudrait l'exécuter en boucle pour en
+mesurer le courant moyen. L'étude est donc théorique, à partir des
+documentations constructeur.
+
+### Méthode de mesure (si elle était réalisée)
+
+Deux programmes identiques, flashés l'un après l'autre :
+- **programme témoin** : capteurs, calcul des 8 entrées, boucle d'attente, **sans**
+  appel au réseau de neurones ;
+- **programme avec IA** : le même, avec la prédiction exécutée en boucle.
+
+La différence de courant moyen sur VDDCORE (tension sur le shunt / 50 mΩ),
+multipliée par la tension et par la durée d'une prédiction, donne l'énergie
+due au seul modèle. LEDs, Ethernet et périphériques inutiles désactivés.
+
+### Côté carte (edge)
+
+**Énergie = puissance du cœur × durée du calcul.** La durée vient de la mesure
+(49 000 cycles) ; la puissance du tableau 34 de la datasheet (IDDCORE en Run,
+25 °C, code en ITCM, périphériques désactivés) : 66 mA sous 0,81 V à 600 MHz,
+85 mA sous 0,89 V à 800 MHz. La datasheet ne donne pas de valeur à 64 MHz :
+elle est estimée par un modèle linéaire entre la consommation en Stop
+(9,06 mA, part statique) et le point à 600 MHz.
+
+| Fréquence | Puissance cœur | Durée d'une prédiction | Énergie |
+|---|---|---|---|
+| 64 MHz (actuelle, estimée) | ≈ 12 mW | 766 µs | **≈ 9 µJ** |
+| 600 MHz | 53,5 mW | 82 µs | **≈ 4,4 µJ** |
+| 800 MHz | 75,7 mW | 61 µs | **≈ 4,6 µJ** |
+
+À haute fréquence, le calcul finit plus vite et les fuites (consommation
+statique) durent moins longtemps : l'énergie par prédiction est **deux fois
+plus faible** qu'à 64 MHz, bien que la puissance soit plus élevée.
+Hypothèse optimiste : le nombre de cycles est supposé constant, ce qui suppose
+code et données en mémoire rapide (ITCM, caches).
+
+Les deux modèles (h0 et h3) coûtent donc environ **10 à 20 µJ par mesure**.
+
+### Côté cloud (ThingSpeak + MATLAB)
+
+| Poste | Hypothèse | Énergie par prédiction |
+|---|---|---|
+| PHY Ethernet de la carte (LAN8742A) | 163 mW en 100BASE-TX avec trafic, pendant ≈ 1,5 s d'échanges (ou les 20 s du cycle si le lien reste actif) | 0,24 à 3,3 J |
+| Réseau Internet | ≈ 50 ko échangés (mesures, scrutation TalkBack, téléchargement des modèles par MATLAB) × 0,0019 à 0,06 kWh/Go | 0,3 à 11 J |
+| Serveur MATLAB | 1 vCPU à pleine charge (3,5 W) pendant 5 à 10 s, × PUE 1,1 à 1,58 | 19 à 55 J |
+| **Total** | | **≈ 20 à 70 J** |
+
+L'intensité du réseau (Aslan et al., 2018) vaut 0,06 kWh/Go en 2015 et diminue
+de moitié environ tous les 2 ans ; la borne basse prolonge cette tendance
+jusqu'en 2025. Ces indicateurs par gigaoctet restent débattus (Guennebaud et
+Bugeau, 2024) : seul l'ordre de grandeur est retenu.
+
+### Conclusion
+
+| | Énergie par prédiction | Temps de réponse |
+|---|---|---|
+| Carte (Cortex-M55, 64 MHz) | **≈ 9 µJ** | 0,77 ms |
+| Cloud (ThingSpeak + MATLAB) | **≈ 20 à 70 J** | 9 à 14 s |
+
+Malgré de larges incertitudes sur le cloud, l'écart est d'environ **six ordres
+de grandeur** (×2 à ×7 millions). Le poste dominant du cloud est le serveur
+MATLAB, qui redémarre et recharge les modèles à chaque prédiction, alors que
+le calcul utile ne représente que 576 multiplications-additions.
+
+Sur la carte, l'inférence n'occupe que 0,77 ms toutes les 20 s, soit 0,004 % du
+temps : la consommation de l'objet est dominée par ce qu'il fait le reste du
+temps (attente, réseau). Pour un vrai capteur sur batterie, les gains viennent
+donc de la mise en veille entre deux mesures et de l'arrêt du lien Ethernet,
+que l'IA embarquée rend possible puisque la décision ne dépend plus du réseau.
+
+Calcul reproductible : `docs/estimation_conso.py`.
+
+### Sources
+
+- STMicroelectronics, *STM32N657 datasheet* (DS14791), tableaux 34 (IDDCORE en Run) et 43 (Stop) : <https://www.st.com/resource/en/datasheet/stm32n657a0.pdf>
+- STMicroelectronics, *UM3417, STM32N6 Nucleo-144 board (MB1940)*, § 7.4.4 : <https://www.st.com/resource/en/user_manual/um3417-stm32n6-nucleo144-board-mb1940-stmicroelectronics.pdf>
+- Microchip, *LAN8742A/LAN8742Ai datasheet*, tableaux 5.2 à 5.5 : <https://www.zeuthen.desy.de/~sulanke/Projects/ICECUBE/mDOM/mainboard/datasheets/eth_phy_LAN8742a.pdf>
+- Cloud Carbon Footprint, *Methodology* (watts par vCPU) : <https://www.cloudcarbonfootprint.org/docs/methodology/>
+- Climatiq, PUE moyen de 1,58 (Uptime Institute) : <https://climatiq.io/blog/how-to-measure-carbon-footprint-cloud-computing-onpremise-hybrid-computing-infrastructure>
+- Aslan, Mayers, Koomey, France, *Electricity Intensity of Internet Data Transmission*, Journal of Industrial Ecology 22(4), 2018 : <https://doi.org/10.1111/jiec.12630>
+- Guennebaud, Bugeau, *Energy consumption of data transfer: Intensity indicators versus absolute estimates*, Journal of Industrial Ecology 28(4), 2024 (cité dans <https://ideas.repec.org/a/bla/inecol/v22y2018i4p785-798.html>)
