@@ -110,7 +110,8 @@ MCU GCC Compiler > Include paths*). Si une génération CubeMX les supprime, les
 
 ## IA embarquée (X-CUBE-AI)
 
-Le réseau de neurones est converti en C par **X-CUBE-AI 10.2.0** (ST Edge AI
+Les deux réseaux de neurones (`h0` : temps actuel, `h3` : prévision à +3 h)
+sont convertis en C par **X-CUBE-AI 10.2.0** (ST Edge AI
 Core 2.2.0) en ligne de commande, à partir du modèle ONNX. Il n'est pas
 intégré par CubeMX : dans ce projet à trois contextes, CubeMX rattache le pack
 au contexte *External Memory Loader*, et une régénération complète mettrait en
@@ -120,17 +121,19 @@ risque l'intégration manuelle de LwIP.
 set STEDGEAI=%USERPROFILE%\STM32Cube\Repository\Packs\STMicroelectronics\X-CUBE-AI\10.2.0\Utilities\windows\stedgeai.exe
 "%STEDGEAI%" analyze  -m ml\models\export\modele_meteo_h0.onnx --target stm32n6 --name meteo_h0
 "%STEDGEAI%" generate -m ml\models\export\modele_meteo_h0.onnx --target stm32n6 --name meteo_h0 -o st_ai_output\h0
+"%STEDGEAI%" generate -m ml\models\export\modele_meteo_h3.onnx --target stm32n6 --name meteo_h3 -o st_ai_output\h3
 ```
 
 | Élément | Emplacement |
 |---|---|
-| Réseau généré (`meteo_h0*.c/.h`, rapport de génération) | `Appli/X-CUBE-AI/App` |
+| Réseaux générés (`meteo_h0*.c/.h`, `meteo_h3*.c/.h`, rapports de génération) | `Appli/X-CUBE-AI/App` |
 | Bibliothèque d'exécution Cortex-M55 et ses en-têtes | `Appli/Middlewares/ST/AI` |
-| Normalisation, classes, vecteurs de test (généré par `ml/04_exporter.py`) | `Appli/Core/Inc/meteo_modele_h0.h` |
-| Appel du réseau, chronométrage, auto-test | `Appli/Core/Src/meteo_ia.c` |
+| Normalisation, classes, vecteurs de test (générés par `ml/04_exporter.py`) | `Appli/Core/Inc/meteo_modele_h0.h`, `meteo_modele_h3.h` |
+| Calcul des entrées, appel des réseaux, chronométrage, auto-test | `Appli/Core/Src/meteo_ia.c` |
 
-Le réseau (484 paramètres, 576 multiplications-additions, 128 octets de
-mémoire de travail) tourne sur le Cortex-M55 en flottant 32 bits.
+Chaque réseau (484 paramètres, 576 multiplications-additions, 128 octets de
+mémoire de travail) tourne sur le Cortex-M55 en flottant 32 bits ; les deux
+partagent la même bibliothèque d'exécution.
 
 Réglages ajoutés au projet Appli (à remettre si une génération CubeMX les
 supprime) :

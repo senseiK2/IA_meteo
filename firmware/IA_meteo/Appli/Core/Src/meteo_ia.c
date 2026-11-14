@@ -1,57 +1,107 @@
 /**
   ******************************************************************************
   * @file    meteo_ia.c
-  * @brief   Inférence du modèle météo sur la carte (TP3 partie 3).
+  * @brief   Inférence des modèles météo sur la carte (TP3 partie 3).
   *
   * Chaîne complète :
   *   TensorFlow (ml/02_entrainer.py) -> ONNX (ml/04_exporter.py)
   *   -> code C (X-CUBE-AI / ST Edge AI Core, commande "stedgeai generate")
-  *   -> ce fichier, qui appelle le réseau généré.
+  *   -> ce fichier, qui appelle les réseaux générés.
   *
-  * Le réseau tourne sur le processeur Cortex-M55 (bibliothèque
+  * Les réseaux tournent sur le processeur Cortex-M55 (bibliothèque
   * NetworkRuntime de X-CUBE-AI), en calcul flottant 32 bits. Le NPU n'est
   * pas utilisé : pour 576 multiplications-additions, le démarrer coûterait
   * plus cher que le calcul lui-même.
   *
-  * API du réseau généré (Appli/X-CUBE-AI/App/meteo_h0.h) :
-  *   ai_meteo_h0_create_and_init() : prépare le réseau dans un tampon de
+  * API d'un réseau généré (Appli/X-CUBE-AI/App/meteo_hX.h) :
+  *   ai_meteo_hX_create_and_init() : prépare le réseau dans un tampon de
   *                                   travail ("activations", 128 octets)
-  *   ai_meteo_h0_inputs_get()      : où écrire les 8 entrées
-  *   ai_meteo_h0_outputs_get()     : où lire les 4 probabilités
-  *   ai_meteo_h0_run()             : exécute le réseau
+  *   ai_meteo_hX_inputs_get()      : où écrire les 8 entrées
+  *   ai_meteo_hX_outputs_get()     : où lire les 4 probabilités
+  *   ai_meteo_hX_run()             : exécute le réseau
+  *
+  * Les deux modèles ont exactement la même API, seul le préfixe change
+  * (ai_meteo_h0_..., ai_meteo_h3_...). On les décrit donc dans un tableau
+  * (s_modeles) : le reste du code est écrit une seule fois pour les deux.
   ******************************************************************************
   */
 #include "meteo_ia.h"
-#include "meteo_modele_h0.h"   /* normalisation, classes, vecteurs de test */
+#include "meteo_modele_h0.h"   /* normalisation, classes, vecteurs de test h0 */
+#include "meteo_modele_h3.h"   /* idem pour h3 */
 #include "meteo_h0.h"
 #include "meteo_h0_data.h"
+#include "meteo_h3.h"
+#include "meteo_h3_data.h"
 #include "console.h"
 #include "stm32n6xx_hal.h"
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
-_Static_assert(METEO_H0_NB_ENTREES == METEO_IA_NB_ENTREES, "nombre d'entrees");
-_Static_assert(METEO_H0_NB_CLASSES == METEO_IA_NB_CLASSES, "nombre de classes");
+/* Les fichiers générés doivent correspondre à ce que le code attend */
+_Static_assert(METEO_H0_NB_ENTREES == METEO_IA_NB_ENTREES, "h0 : nombre d'entrees");
+_Static_assert(METEO_H3_NB_ENTREES == METEO_IA_NB_ENTREES, "h3 : nombre d'entrees");
+_Static_assert(METEO_H0_NB_CLASSES == METEO_IA_NB_CLASSES, "h0 : nombre de classes");
+_Static_assert(METEO_H3_NB_CLASSES == METEO_IA_NB_CLASSES, "h3 : nombre de classes");
 _Static_assert(METEO_H0_E_PRES == METEO_IA_E_PRES, "indice pression");
 _Static_assert(METEO_H0_E_ECART_ROSEE == METEO_IA_E_ECART_ROSEE, "indice ecart rosee");
-_Static_assert(AI_METEO_H0_IN_1_SIZE == METEO_IA_NB_ENTREES, "entree du reseau genere");
-_Static_assert(AI_METEO_H0_OUT_1_SIZE == METEO_IA_NB_CLASSES, "sortie du reseau genere");
+_Static_assert(AI_METEO_H0_IN_1_SIZE == METEO_IA_NB_ENTREES, "entree du reseau h0");
+_Static_assert(AI_METEO_H3_IN_1_SIZE == METEO_IA_NB_ENTREES, "entree du reseau h3");
+_Static_assert(AI_METEO_H0_OUT_1_SIZE == METEO_IA_NB_CLASSES, "sortie du reseau h0");
+_Static_assert(AI_METEO_H3_OUT_1_SIZE == METEO_IA_NB_CLASSES, "sortie du reseau h3");
 
-/* Réseau (identifiant opaque) et ses tampons d'entrée / sortie */
-static ai_handle  s_reseau = AI_HANDLE_NULL;
-static ai_buffer *s_entree = NULL;
-static ai_buffer *s_sortie = NULL;
-
-/* Mémoire de travail du réseau : 128 octets (voir l'analyse de stedgeai).
+/* Mémoire de travail de chaque réseau : 128 octets (analyse de stedgeai).
  * Les entrées et sorties sont rangées dedans ("allocate-inputs/outputs"). */
-AI_ALIGNED(32)
-static ai_u8 s_activations[AI_METEO_H0_DATA_ACTIVATIONS_SIZE];
+AI_ALIGNED(32) static ai_u8 s_activations_h0[AI_METEO_H0_DATA_ACTIVATIONS_SIZE];
+AI_ALIGNED(32) static ai_u8 s_activations_h3[AI_METEO_H3_DATA_ACTIVATIONS_SIZE];
+
+/* Tout ce qui distingue un modèle de l'autre */
+typedef struct
+{
+  const char *nom;
+  /* fonctions générées par X-CUBE-AI pour ce réseau */
+  ai_error   (*creer)(ai_handle *reseau, const ai_handle activations[],
+                      const ai_handle poids[]);
+  ai_buffer *(*entrees)(ai_handle reseau, ai_u16 *n);
+  ai_buffer *(*sorties)(ai_handle reseau, ai_u16 *n);
+  ai_i32     (*executer)(ai_handle reseau, const ai_buffer *in, ai_buffer *out);
+  ai_u8       *activations;
+  /* normalisation et vecteurs de test exportés par ml/04_exporter.py */
+  const float *moyenne;
+  const float *ecart_type;
+  const float (*test_entrees)[METEO_IA_NB_ENTREES];
+  const unsigned char *test_classe;
+  int          nb_tests;
+  /* état, rempli par meteo_ia_init() */
+  ai_handle    reseau;
+  ai_buffer   *entree;
+  ai_buffer   *sortie;
+} modele_t;
+
+static modele_t s_modeles[METEO_IA_NB_MODELES] = {
+  [METEO_IA_H0] = {
+    .nom = "h0", .creer = ai_meteo_h0_create_and_init,
+    .entrees = ai_meteo_h0_inputs_get, .sorties = ai_meteo_h0_outputs_get,
+    .executer = ai_meteo_h0_run, .activations = s_activations_h0,
+    .moyenne = METEO_H0_MOYENNE, .ecart_type = METEO_H0_ECART_TYPE,
+    .test_entrees = METEO_H0_TEST_ENTREES, .test_classe = METEO_H0_TEST_CLASSE,
+    .nb_tests = METEO_H0_NB_VECTEURS_TEST, .reseau = AI_HANDLE_NULL,
+  },
+  [METEO_IA_H3] = {
+    .nom = "h3", .creer = ai_meteo_h3_create_and_init,
+    .entrees = ai_meteo_h3_inputs_get, .sorties = ai_meteo_h3_outputs_get,
+    .executer = ai_meteo_h3_run, .activations = s_activations_h3,
+    .moyenne = METEO_H3_MOYENNE, .ecart_type = METEO_H3_ECART_TYPE,
+    .test_entrees = METEO_H3_TEST_ENTREES, .test_classe = METEO_H3_TEST_CLASSE,
+    .nb_tests = METEO_H3_NB_VECTEURS_TEST, .reseau = AI_HANDLE_NULL,
+  },
+};
 
 /* --------------------------------------------------------------------------
  * Mesure du temps : compteur de cycles du processeur (DWT->CYCCNT).
  * Il avance d'une unité à chaque coup d'horloge du Cortex-M55 : bien plus
  * précis que HAL_GetTick() (1 ms), indispensable pour un calcul qui dure
- * quelques microsecondes.
+ * quelques centaines de microsecondes.
  * ------------------------------------------------------------------------ */
 static void compteur_cycles_init(void)
 {
@@ -68,52 +118,79 @@ uint32_t meteo_ia_cycles_en_us(uint32_t cycles)
 
 const char *meteo_ia_classe(int k)
 {
+  /* Les deux modèles ont les mêmes classes, dans le même ordre (vérifié
+   * dans meteo_ia_init) */
   return ((k >= 0) && (k < METEO_IA_NB_CLASSES)) ? METEO_H0_CLASSES[k] : "?";
+}
+
+const char *meteo_ia_nom(meteo_ia_modele_t modele)
+{
+  return (modele < METEO_IA_NB_MODELES) ? s_modeles[modele].nom : "?";
 }
 
 bool meteo_ia_init(void)
 {
-  const ai_handle activations[] = { s_activations };
+  bool ok = true;
 
   compteur_cycles_init();
 
-  /* weights = NULL : le réseau utilise les poids générés dans
-   * meteo_h0_data_params.c (tableau constant en mémoire) */
-  ai_error err = ai_meteo_h0_create_and_init(&s_reseau, activations, NULL);
-  if (err.type != AI_ERROR_NONE)
+  for (int k = 0; k < METEO_IA_NB_CLASSES; k++)
   {
-    console_lock();
-    printf("  IA : erreur d'initialisation (type %d, code %d)\r\n",
-           (int)err.type, (int)err.code);
-    console_unlock();
-    s_reseau = AI_HANDLE_NULL;
-    return false;
+    if (strcmp(METEO_H0_CLASSES[k], METEO_H3_CLASSES[k]) != 0)
+    {
+      console_lock();
+      printf("  IA : les modeles h0 et h3 n'ont pas les memes classes !\r\n");
+      console_unlock();
+      return false;
+    }
   }
 
-  s_entree = ai_meteo_h0_inputs_get(s_reseau, NULL);
-  s_sortie = ai_meteo_h0_outputs_get(s_reseau, NULL);
-  return (s_entree != NULL) && (s_sortie != NULL);
+  for (int m = 0; m < METEO_IA_NB_MODELES; m++)
+  {
+    modele_t *md = &s_modeles[m];
+    const ai_handle activations[] = { md->activations };
+
+    /* poids = NULL : le réseau utilise les poids générés dans
+     * meteo_hX_data_params.c (tableau constant en mémoire) */
+    ai_error err = md->creer(&md->reseau, activations, NULL);
+    if (err.type != AI_ERROR_NONE)
+    {
+      console_lock();
+      printf("  IA %s : erreur d'initialisation (type %d, code %d)\r\n",
+             md->nom, (int)err.type, (int)err.code);
+      console_unlock();
+      md->reseau = AI_HANDLE_NULL;
+      ok = false;
+      continue;
+    }
+    md->entree = md->entrees(md->reseau, NULL);
+    md->sortie = md->sorties(md->reseau, NULL);
+    ok = ok && (md->entree != NULL) && (md->sortie != NULL);
+  }
+  return ok;
 }
 
-int meteo_ia_predire(const float entrees[METEO_IA_NB_ENTREES],
+int meteo_ia_predire(meteo_ia_modele_t modele,
+                     const float entrees[METEO_IA_NB_ENTREES],
                      float proba[METEO_IA_NB_CLASSES], uint32_t *cycles)
 {
-  if (s_reseau == AI_HANDLE_NULL)
+  if ((modele >= METEO_IA_NB_MODELES) || (s_modeles[modele].reseau == AI_HANDLE_NULL))
   {
     return -1;
   }
+  const modele_t *md = &s_modeles[modele];
 
   /* 1. Normalisation, exactement comme en Python et dans MATLAB :
-   *    x_norm = (x - moyenne) / écart-type                              */
-  float *x = (float *)s_entree[0].data;
+   *    x_norm = (x - moyenne) / écart-type, avec les valeurs du modèle   */
+  float *x = (float *)md->entree[0].data;
   for (int i = 0; i < METEO_IA_NB_ENTREES; i++)
   {
-    x[i] = (entrees[i] - METEO_H0_MOYENNE[i]) / METEO_H0_ECART_TYPE[i];
+    x[i] = (entrees[i] - md->moyenne[i]) / md->ecart_type[i];
   }
 
   /* 2. Exécution du réseau, chronométrée en cycles processeur */
   uint32_t t0 = DWT->CYCCNT;
-  ai_i32 n = ai_meteo_h0_run(s_reseau, &s_entree[0], &s_sortie[0]);
+  ai_i32 n = md->executer(md->reseau, &md->entree[0], &md->sortie[0]);
   uint32_t duree = DWT->CYCCNT - t0;
   if (cycles != NULL)
   {
@@ -125,7 +202,7 @@ int meteo_ia_predire(const float entrees[METEO_IA_NB_ENTREES],
   }
 
   /* 3. Lecture des 4 probabilités et choix de la plus grande */
-  const float *p = (const float *)s_sortie[0].data;
+  const float *p = (const float *)md->sortie[0].data;
   int meilleure = 0;
   for (int k = 0; k < METEO_IA_NB_CLASSES; k++)
   {
@@ -198,22 +275,27 @@ static void pourcent(float p, char *buf, int len)
   snprintf(buf, (size_t)len, "%3ld.%01ld", (long)(d / 10), (long)(d % 10));
 }
 
-int meteo_ia_autotest(void)
+int meteo_ia_autotest(meteo_ia_modele_t modele)
 {
+  if (modele >= METEO_IA_NB_MODELES)
+  {
+    return 0;
+  }
+  const modele_t *md = &s_modeles[modele];
   int identiques = 0;
   uint32_t cycles_max = 0;
 
   console_lock();
-  printf("\r\n  === Auto-test IA embarquee (%d vecteurs, reponses Python connues) ===\r\n",
-         METEO_H0_NB_VECTEURS_TEST);
+  printf("\r\n  === Auto-test IA embarquee, modele %s (%d vecteurs, reponses Python connues) ===\r\n",
+         md->nom, md->nb_tests);
   printf("   n  attendu         carte           Clair  Nuag.  Brou.  Prec.  cycles\r\n");
 
-  for (int v = 0; v < METEO_H0_NB_VECTEURS_TEST; v++)
+  for (int v = 0; v < md->nb_tests; v++)
   {
     float proba[METEO_IA_NB_CLASSES];
     uint32_t cycles = 0;
-    int k = meteo_ia_predire(METEO_H0_TEST_ENTREES[v], proba, &cycles);
-    int attendu = (int)METEO_H0_TEST_CLASSE[v];
+    int k = meteo_ia_predire(modele, md->test_entrees[v], proba, &cycles);
+    int attendu = (int)md->test_classe[v];
     char p[METEO_IA_NB_CLASSES][8];
 
     for (int c = 0; c < METEO_IA_NB_CLASSES; c++)
@@ -234,8 +316,8 @@ int meteo_ia_autotest(void)
     }
   }
 
-  printf("  Resultat : %d / %d identiques a Python\r\n", identiques,
-         METEO_H0_NB_VECTEURS_TEST);
+  printf("  Resultat %s : %d / %d identiques a Python\r\n", md->nom, identiques,
+         md->nb_tests);
   printf("  Temps d'inference max : %lu cycles = %lu us (CPU a %lu MHz)\r\n",
          (unsigned long)cycles_max, (unsigned long)meteo_ia_cycles_en_us(cycles_max),
          (unsigned long)(HAL_RCC_GetCpuClockFreq() / 1000000U));

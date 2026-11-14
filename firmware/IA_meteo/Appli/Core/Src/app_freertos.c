@@ -12,12 +12,13 @@
   *     4 -> TacheCapteurs + TacheReseau : envoi des mesures sur ThingSpeak
   *          toutes les 20 s, puis attente de la prédiction calculée par
   *          MATLAB dans le cloud et renvoyée par TalkBack (TP3.2), LED bleue
-  *     5 -> TacheCapteurs + TacheIA : réseau de neurones exécuté SUR LA
-  *          CARTE (TP3.3), code généré par X-CUBE-AI. Pour l'instant :
-  *          auto-test sur les vecteurs de test de Python et temps de calcul.
+  *     5 -> TacheCapteurs + TacheIA : réseaux de neurones exécutés SUR LA
+  *          CARTE (TP3.3), code généré par X-CUBE-AI : auto-test des modèles
+  *          h0 (maintenant) et h3 (dans 3 h) sur les vecteurs de test de
+  *          Python, et temps de calcul.
   *     6 -> démo finale cloud / edge (TP3.3c) : comme la démo 4, mais la
-  *          carte calcule AUSSI sa propre prédiction sur la même mesure, puis
-  *          compare sa réponse et son temps à ceux du cloud.
+  *          carte calcule AUSSI ses propres prédictions (h0 et h3) sur la
+  *          même mesure, puis compare réponses et temps à ceux du cloud.
   *
   *   Les deux tâches se partagent les dernières mesures par une "boîte aux
   *   lettres" protégée par un mutex (mesures_publier / mesures_lire).
@@ -415,16 +416,19 @@ static void fx1(float v, char *buf, size_t len)
            (long)(((d < 0) ? -d : d) / 10), (long)(((d < 0) ? -d : d) % 10));
 }
 
-/* Extrait la classe du modèle h0 de la réponse du cloud
- * "h0=Nuageux,64;h3=Precipitations,55" -> "Nuageux" */
-static bool classe_cloud_h0(const char *commande, char *classe, size_t taille)
+/* Extrait d'une réponse du cloud la classe prédite par un modèle :
+ * "h0=Nuageux,64;h3=Precipitations,55", "h3" -> "Precipitations" */
+static bool classe_cloud(const char *commande, const char *modele,
+                         char *classe, size_t taille)
 {
-  const char *debut = strstr(commande, "h0=");
+  char cle[8];
+  snprintf(cle, sizeof(cle), "%s=", modele);
+  const char *debut = strstr(commande, cle);
   if (debut == NULL)
   {
     return false;
   }
-  debut += 3;
+  debut += strlen(cle);
   size_t n = 0;
   while ((debut[n] != ',') && (debut[n] != ';') && (debut[n] != '\0') && (n < taille - 1U))
   {
@@ -435,10 +439,10 @@ static bool classe_cloud_h0(const char *commande, char *classe, size_t taille)
   return n > 0U;
 }
 
-/* Bilan depuis le démarrage : combien de fois la carte et le cloud ont
- * donné la même classe */
-static uint32_t s_nb_comparaisons = 0U;
-static uint32_t s_nb_accords = 0U;
+/* Bilan depuis le démarrage, pour chaque modèle : combien de fois la carte
+ * et le cloud ont donné la même classe */
+static uint32_t s_nb_comparaisons[METEO_IA_NB_MODELES];
+static uint32_t s_nb_accords[METEO_IA_NB_MODELES];
 #endif
 
 /* TP3.2 : envoie les dernières mesures sur le canal ThingSpeak, puis attend
@@ -503,18 +507,22 @@ static void reseau_action(void)
    *    vient de l'en-tête "Date:" de la réponse de ThingSpeak qu'on vient
    *    de recevoir. */
   float x[METEO_IA_NB_ENTREES];
-  float proba[METEO_IA_NB_CLASSES];
+  float proba[METEO_IA_NB_MODELES][METEO_IA_NB_CLASSES];
   uint32_t epoch = 0U;
-  uint32_t cycles = 0U;
-  int k_carte = -1;
-  if (thingspeak_heure_utc(&epoch))
+  uint32_t cycles[METEO_IA_NB_MODELES] = { 0U };
+  int k_carte[METEO_IA_NB_MODELES] = { -1, -1 };
+  bool heure_ok = thingspeak_heure_utc(&epoch);
+  if (heure_ok)
   {
     meteo_ia_calculer_entrees(m.temp_hum_c, m.humidity_rh, m.pressure_hpa, epoch, x);
-    k_carte = meteo_ia_predire(x, proba, &cycles);
+    for (int md = 0; md < METEO_IA_NB_MODELES; md++)
+    {
+      k_carte[md] = meteo_ia_predire((meteo_ia_modele_t)md, x, proba[md], &cycles[md]);
+    }
   }
 
   console_lock();
-  if (k_carte >= 0)
+  if (heure_ok)
   {
     char pmer[16], ecart[16];
     fx1(x[METEO_IA_E_PRES], pmer, sizeof(pmer));
@@ -522,13 +530,25 @@ static void reseau_action(void)
     printf("  Entrees carte    : P mer %s hPa, ecart rosee %s, heure UTC %02lu:%02lu\r\n",
            pmer, ecart, (unsigned long)((epoch % 86400U) / 3600U),
            (unsigned long)((epoch % 3600U) / 60U));
-    printf("  Prediction carte : %s (%lu %%) en %lu us\r\n", meteo_ia_classe(k_carte),
-           (unsigned long)(proba[k_carte] * 100.0f + 0.5f),
-           (unsigned long)meteo_ia_cycles_en_us(cycles));
+    for (int md = 0; md < METEO_IA_NB_MODELES; md++)
+    {
+      if (k_carte[md] >= 0)
+      {
+        printf("  Prediction carte : %s=%s (%lu %%) en %lu us\r\n",
+               meteo_ia_nom((meteo_ia_modele_t)md), meteo_ia_classe(k_carte[md]),
+               (unsigned long)(proba[md][k_carte[md]] * 100.0f + 0.5f),
+               (unsigned long)meteo_ia_cycles_en_us(cycles[md]));
+      }
+      else
+      {
+        printf("  Prediction carte : %s, erreur du reseau\r\n",
+               meteo_ia_nom((meteo_ia_modele_t)md));
+      }
+    }
   }
   else
   {
-    printf("  Prediction carte : impossible (heure inconnue ou erreur du reseau)\r\n");
+    printf("  Prediction carte : impossible (heure inconnue)\r\n");
   }
   console_unlock();
 #endif
@@ -550,17 +570,22 @@ static void reseau_action(void)
       printf("  Prediction cloud : %s (recue %lu ms apres l'envoi)\r\n",
              commande, (unsigned long)latence);
 #if (DEMO_PARTIE == 6)
-      char classe_cloud[24];
-      if ((k_carte >= 0) && classe_cloud_h0(commande, classe_cloud, sizeof(classe_cloud)))
+      for (int md = 0; md < METEO_IA_NB_MODELES; md++)
       {
-        bool accord = (strcmp(classe_cloud, meteo_ia_classe(k_carte)) == 0);
-        s_nb_comparaisons++;
-        s_nb_accords += accord ? 1U : 0U;
-        printf("  => carte : %s en %lu us | cloud : %s en %lu ms | %s (%lu/%lu)\r\n",
-               meteo_ia_classe(k_carte), (unsigned long)meteo_ia_cycles_en_us(cycles),
-               classe_cloud, (unsigned long)latence,
-               accord ? "ACCORD" : "DESACCORD",
-               (unsigned long)s_nb_accords, (unsigned long)s_nb_comparaisons);
+        char cl_cloud[24];
+        const char *nom = meteo_ia_nom((meteo_ia_modele_t)md);
+        if ((k_carte[md] >= 0) && classe_cloud(commande, nom, cl_cloud, sizeof(cl_cloud)))
+        {
+          bool accord = (strcmp(cl_cloud, meteo_ia_classe(k_carte[md])) == 0);
+          s_nb_comparaisons[md]++;
+          s_nb_accords[md] += accord ? 1U : 0U;
+          printf("  => %s carte : %s en %lu us | cloud : %s en %lu ms | %s (%lu/%lu)\r\n",
+                 nom, meteo_ia_classe(k_carte[md]),
+                 (unsigned long)meteo_ia_cycles_en_us(cycles[md]),
+                 cl_cloud, (unsigned long)latence,
+                 accord ? "ACCORD" : "DESACCORD",
+                 (unsigned long)s_nb_accords[md], (unsigned long)s_nb_comparaisons[md]);
+        }
       }
 #endif
     }
@@ -591,11 +616,12 @@ void TacheReseau(void *argument)
    * d'abord qu'il donne les mêmes réponses que Python. */
   if (meteo_ia_init())
   {
-    meteo_ia_autotest();
+    meteo_ia_autotest(METEO_IA_H0);
+    meteo_ia_autotest(METEO_IA_H3);
   }
   else
   {
-    log_etat("IA : initialisation du reseau impossible");
+    log_etat("IA : initialisation des reseaux impossible");
   }
 #endif
 
@@ -639,14 +665,15 @@ void TacheIA(void *argument)
 
   if (!meteo_ia_init())
   {
-    log_etat("IA : initialisation du reseau impossible");
+    log_etat("IA : initialisation des reseaux impossible");
     for (;;)
     {
       osDelay(1000);
     }
   }
-  log_etat("IA : reseau meteo_h0 pret (X-CUBE-AI, Cortex-M55)");
-  meteo_ia_autotest();
+  log_etat("IA : reseaux meteo_h0 et meteo_h3 prets (X-CUBE-AI, Cortex-M55)");
+  meteo_ia_autotest(METEO_IA_H0);
+  meteo_ia_autotest(METEO_IA_H3);
 
   for (;;)
   {

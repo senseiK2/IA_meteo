@@ -1,0 +1,176 @@
+ST Edge AI Core v2.2.0-20266 2adc00962
+Created date          : 2026-11-14 12:21:56
+Parameters            : generate -m ml\models\export\modele_meteo_h3.onnx --target stm32n6 --name meteo_h3 -o st_ai_output\h3
+
+Exec/report summary (generate)
+--------------------------------------------------------------------------------
+model file         :   C:\Univ\IA_meteo\ml\models\export\modele_meteo_h3.onnx   
+type               :   onnx                                                     
+c_name             :   meteo_h3                                                 
+compression        :   lossless                                                 
+options            :   allocate-inputs, allocate-outputs                        
+optimization       :   balanced                                                 
+target/series      :   stm32n6                                                  
+workspace dir      :   C:\Univ\IA_meteo\st_ai_ws                                
+output dir         :   C:\Univ\IA_meteo\st_ai_output\h3                         
+model_fmt          :   float                                                    
+model_name         :   modele_meteo_h3                                          
+model_hash         :   0xe73b97ebf560d772eb6d84d45ea8fede                       
+params #           :   484 items (1.89 KiB)                                     
+--------------------------------------------------------------------------------
+input 1/1          :   'input', f32(1x8), 32 Bytes, activations                 
+output 1/1         :   'output', f32(1x4), 16 Bytes, activations                
+macc               :   576                                                      
+weights (ro)       :   1,936 B (1.89 KiB) (1 segment)                           
+activations (rw)   :   128 B (128 B) (1 segment) *                              
+ram (total)        :   128 B (128 B) = 128 + 0 + 0                              
+--------------------------------------------------------------------------------
+(*) 'input'/'output' buffers are allocated in the activations buffer
+
+Model name - modele_meteo_h3
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+m_id   layer (type,original)                                  oshape        param/size     macc                     connected to   | c_size             c_macc          c_type                
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+1      meteo_mlp_1_dense_..ariableOp0 (Placeholder, Gemm)     [b:8,c:16]    128/512                                                | +64(+12.5%)        +144(+100.0%)   Dense_[0]             
+       meteo_mlp_1_dense_..ariableOp0 (Placeholder, Gemm)     [b:16]        16/64                                                  | -64(-100.0%)                       
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+3      meteo_mlp_1_dense_..ariableOp0 (Placeholder, MatMul)   [b:16,c:16]   256/1,024                                              | -1,024(-100.0%)                    
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+4      meteo_mlp_1_dense_..ariableOp0 (Placeholder, Add)      [b:16]        16/64                                                  | +1,024(+1600.0%)   +272(+100.0%)   Dense_[2]             
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+6      meteo_mlp_1_output..ariableOp0 (Placeholder, MatMul)   [b:16,c:4]    64/256                                                 | -256(-100.0%)                      
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+7      meteo_mlp_1_output..ariableOp0 (Placeholder, Add)      [b:4]         4/16                                                   | +256(+1600.0%)     +68(+100.0%)    Dense_[4]             
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+0      input (Input, )                                        [b:1,c:8]                                                            |                                    
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+1      meteo_mlp_1_dense_0_1_BiasAdd0 (Gemm, Gemm)            [b:1,c:16]                    144                            input   |                    -144(-100.0%)   
+                                                                                                  meteo_mlp_1_dense_..ariableOp0   | 
+                                                                                                  meteo_mlp_1_dense_..ariableOp0   | 
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+2      meteo_mlp_1_dense_0_1_Relu0 (Nonlinearity, Relu)       [b:1,c:16]                     16   meteo_mlp_1_dense_0_1_BiasAdd0   |                                    Nonlinearity_[1]      
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+3      meteo_mlp_1_dense_1_1_MatMul0 (Gemm, MatMul)           [b:1,c:16]                    272      meteo_mlp_1_dense_0_1_Relu0   |                    -272(-100.0%)   
+                                                                                                  meteo_mlp_1_dense_..ariableOp0   | 
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+4      meteo_mlp_1_dense_1_1_BiasAdd0 (Eltwise, Add)          [b:1,c:16]                     16    meteo_mlp_1_dense_1_1_MatMul0   |                    -16(-100.0%)    
+                                                                                                  meteo_mlp_1_dense_..ariableOp0   | 
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+5      meteo_mlp_1_dense_1_1_Relu0 (Nonlinearity, Relu)       [b:1,c:16]                     16   meteo_mlp_1_dense_1_1_BiasAdd0   |                                    Nonlinearity_[3]      
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+6      meteo_mlp_1_output_1_MatMul0 (Gemm, MatMul)            [b:1,c:4]                      68      meteo_mlp_1_dense_1_1_Relu0   |                    -68(-100.0%)    
+                                                                                                  meteo_mlp_1_output..ariableOp0   | 
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+7      meteo_mlp_1_output_1_BiasAdd0 (Eltwise, Add)           [b:1,c:4]                       4     meteo_mlp_1_output_1_MatMul0   |                    -4(-100.0%)     
+                                                                                                  meteo_mlp_1_output..ariableOp0   | 
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+8      output (Nonlinearity, Softmax)                         [b:1,c:4]                      60    meteo_mlp_1_output_1_BiasAdd0   |                                    Nonlinearity_[o][5]   
+------ ------------------------------------------------------ ------------- ------------ ------ -------------------------------- --- ------------------ --------------- --------------------- 
+model/c-model: macc=596/576 -20(-3.4%) weights=1,936/1,936  activations=--/128 io=--/0
+
+
+
+Generated C-graph summary
+------------------------------------------------------------------------------------------------------------------------
+model name            : modele_meteo_h3
+c-name                : meteo_h3
+c-node #              : 6
+c-array #             : 13
+activations size      : 128 (1 segment)
+weights size          : 1936 (1 segment)
+macc                  : 576
+inputs                : ['input_output']
+outputs               : ['output_output']
+
+C-Arrays (13)
+------ ---------------------------------------- ----------- ------------------------- ------------- --------- 
+c_id   name (*_array)                           item/size   domain/mem-pool           c-type        comment   
+------ ---------------------------------------- ----------- ------------------------- ------------- --------- 
+0      input_output                             8/32        activations/**default**   float         /input    
+1      meteo_mlp_1_dense_0_1_BiasAdd0_bias      16/64       weights/weights           const float             
+2      meteo_mlp_1_dense_0_1_BiasAdd0_output    16/64       activations/**default**   float                   
+3      meteo_mlp_1_dense_0_1_BiasAdd0_weights   128/512     weights/weights           const float             
+4      meteo_mlp_1_dense_0_1_Relu0_output       16/64       activations/**default**   float                   
+5      meteo_mlp_1_dense_1_1_MatMul0_bias       16/64       weights/weights           const float             
+6      meteo_mlp_1_dense_1_1_MatMul0_output     16/64       activations/**default**   float                   
+7      meteo_mlp_1_dense_1_1_MatMul0_weights    256/1024    weights/weights           const float             
+8      meteo_mlp_1_dense_1_1_Relu0_output       16/64       activations/**default**   float                   
+9      meteo_mlp_1_output_1_MatMul0_bias        4/16        weights/weights           const float             
+10     meteo_mlp_1_output_1_MatMul0_output      4/16        activations/**default**   float                   
+11     meteo_mlp_1_output_1_MatMul0_weights     64/256      weights/weights           const float             
+12     output_output                            4/16        activations/**default**   float         /output   
+------ ---------------------------------------- ----------- ------------------------- ------------- --------- 
+
+C-Layers (6)
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+c_id   name (*_layer)                   id   layer_type      macc   rom    tensors                                     shape (array id)   
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+0      meteo_mlp_1_dense_0_1_BiasAdd0   1    Dense           144    576    I: input_output                             f32(1x8) (0)       
+                                                                           W: meteo_mlp_1_dense_0_1_BiasAdd0_weights   f32(16x8) (3)      
+                                                                           W: meteo_mlp_1_dense_0_1_BiasAdd0_bias      f32(16) (1)        
+                                                                           O: meteo_mlp_1_dense_0_1_BiasAdd0_output    f32(1x16) (2)      
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+1      meteo_mlp_1_dense_0_1_Relu0      2    Nonlinearity    16     0      I: meteo_mlp_1_dense_0_1_BiasAdd0_output    f32(1x16) (2)      
+                                                                           O: meteo_mlp_1_dense_0_1_Relu0_output       f32(1x16) (4)      
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+2      meteo_mlp_1_dense_1_1_MatMul0    4    Dense           272    1088   I: meteo_mlp_1_dense_0_1_Relu0_output       f32(1x16) (4)      
+                                                                           W: meteo_mlp_1_dense_1_1_MatMul0_weights    f32(16x16) (7)     
+                                                                           W: meteo_mlp_1_dense_1_1_MatMul0_bias       f32(16) (5)        
+                                                                           O: meteo_mlp_1_dense_1_1_MatMul0_output     f32(1x16) (6)      
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+3      meteo_mlp_1_dense_1_1_Relu0      5    Nonlinearity    16     0      I: meteo_mlp_1_dense_1_1_MatMul0_output     f32(1x16) (6)      
+                                                                           O: meteo_mlp_1_dense_1_1_Relu0_output       f32(1x16) (8)      
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+4      meteo_mlp_1_output_1_MatMul0     7    Dense           68     272    I: meteo_mlp_1_dense_1_1_Relu0_output       f32(1x16) (8)      
+                                                                           W: meteo_mlp_1_output_1_MatMul0_weights     f32(4x16) (11)     
+                                                                           W: meteo_mlp_1_output_1_MatMul0_bias        f32(4) (9)         
+                                                                           O: meteo_mlp_1_output_1_MatMul0_output      f32(1x4) (10)      
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+5      output                           8    Nonlinearity    60     0      I: meteo_mlp_1_output_1_MatMul0_output      f32(1x4) (10)      
+                                                                           O: output_output                            f32(1x4) (12)      
+------ -------------------------------- ---- --------------- ------ ------ ------------------------------------------- ------------------ 
+
+
+
+Number of operations per c-layer
+------- ------ -------------------------------------------- ----- -------------- 
+c_id    m_id   name (type)                                    #op           type 
+------- ------ -------------------------------------------- ----- -------------- 
+0       1      meteo_mlp_1_dense_0_1_BiasAdd0 (Dense)         144   smul_f32_f32 
+1       2      meteo_mlp_1_dense_0_1_Relu0 (Nonlinearity)      16     op_f32_f32 
+2       4      meteo_mlp_1_dense_1_1_MatMul0 (Dense)          272   smul_f32_f32 
+3       5      meteo_mlp_1_dense_1_1_Relu0 (Nonlinearity)      16     op_f32_f32 
+4       7      meteo_mlp_1_output_1_MatMul0 (Dense)            68   smul_f32_f32 
+5       8      output (Nonlinearity)                           60     op_f32_f32 
+------- ------ -------------------------------------------- ----- -------------- 
+total                                                         576 
+
+Number of operation types
+---------------- ----- ----------- 
+operation type       #           % 
+---------------- ----- ----------- 
+smul_f32_f32       484       84.0% 
+op_f32_f32          92       16.0% 
+
+Complexity report (model)
+------ ------------------------------------------ ------------------------- ------------------------- ------ 
+m_id   name                                       c_macc                    c_rom                     c_id   
+------ ------------------------------------------ ------------------------- ------------------------- ------ 
+1      meteo_mlp_1_dense_0_1_Cast_R..ariableOp0   ||||||||          25.0%   ||||||||          29.8%   [0]    
+4      meteo_mlp_1_dense_1_1_BiasAd..ariableOp0   ||||||||||||||||  47.2%   ||||||||||||||||  56.2%   [2]    
+7      meteo_mlp_1_output_1_BiasAdd..ariableOp0   ||||              11.8%   ||||              14.0%   [4]    
+2      meteo_mlp_1_dense_0_1_Relu0                |                  2.8%   |                  0.0%   [1]    
+5      meteo_mlp_1_dense_1_1_Relu0                |                  2.8%   |                  0.0%   [3]    
+8      output                                     ||||              10.4%   |                  0.0%   [5]    
+------ ------------------------------------------ ------------------------- ------------------------- ------ 
+macc=576 weights=1,936 act=128 ram_io=0
+
+Generated files (7)
+--------------------------------------------------------- 
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3_data_params.h   
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3_data_params.c   
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3_data.h          
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3_data.c          
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3_config.h        
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3.h               
+C:\Univ\IA_meteo\st_ai_output\h3\meteo_h3.c               
