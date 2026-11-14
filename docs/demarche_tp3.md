@@ -362,3 +362,44 @@ modèle interprète cet air sec comme un ciel dégagé. **Carte placée dehors**
 la prédiction est devenue correcte. Le capteur doit donc être installé à
 l'extérieur, à l'abri du soleil, comme une station météo : un modèle n'est
 fiable que sur des entrées comparables à celles de son apprentissage.
+
+---
+
+## 9. Inférence sur la carte (TP3.3)
+
+### Chaîne
+
+`modele_meteo_h0.onnx` → **X-CUBE-AI 10.2.0** (`stedgeai generate --target
+stm32n6`) → code C (`Appli/X-CUBE-AI/App`) + bibliothèque d'exécution
+Cortex-M55 → `meteo_ia.c` (normalisation, appel, chronométrage).
+
+L'intégration par CubeMX a été écartée : dans ce projet à trois contextes
+(FSBL, Appli, External Memory Loader), CubeMX rattachait le pack au contexte
+External Memory Loader sans permettre de le déplacer, et une régénération
+complète du projet aurait mis en risque l'intégration manuelle de LwIP et de
+FreeRTOS. L'outil en ligne de commande produit le même code.
+
+Analyse de `stedgeai` : 484 paramètres (1,9 Kio en float32), 576
+multiplications-additions, 128 octets de mémoire de travail (entrées et
+sorties comprises). Le réseau tourne sur le Cortex-M55 en flottant 32 bits ;
+le NPU n'est pas utilisé, son démarrage coûterait plus que ce calcul.
+
+### Validation (auto-test, démo 5)
+
+Les 12 vecteurs de test exportés par `ml/04_exporter.py` (3 heures réelles de
+2025 par classe) donnent **12 / 12 classes identiques** à Python, avec les
+mêmes probabilités au dixième de pourcent près (vecteur 1 : 0,0 / 30,6 / 43,3
+/ 26,1 % sur la carte ; 0,0 / 30,6 / 43,3 / 26,2 % en Python).
+
+### Temps d'inférence
+
+| | Carte (Cortex-M55) | Cloud (ThingSpeak + MATLAB) |
+|---|---|---|
+| Temps de réponse | **≈ 0,78 ms** (49 917 cycles à 64 MHz) | ≈ 7 à 9 s |
+| Réseau nécessaire | non | oui |
+
+Le calcul sur la carte est environ **10 000 fois plus rapide** que l'aller-retour
+dans le cloud. Les 50 000 cycles pour 576 multiplications-additions viennent
+surtout du coût fixe du moteur d'exécution (préparation de chaque couche) et
+d'une configuration non optimisée : processeur à 64 MHz (le STM32N6 peut aller
+jusqu'à 800 MHz) et caches désactivés.
