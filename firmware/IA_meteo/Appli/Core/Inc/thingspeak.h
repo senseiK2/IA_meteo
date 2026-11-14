@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define TS_NB_CHAMPS  8           /* un canal ThingSpeak a 8 champs (field1..8) */
+
 typedef enum
 {
   TS_OK = 0,          /* mesures enregistrées dans le canal                */
@@ -39,6 +41,15 @@ typedef enum
 ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
                                  float temp_c, float humidite_rh,
                                  float pression_hpa, int32_t *numero);
+
+/**
+  * Version générale : envoie les champs dont le bit est à 1 dans "masque"
+  * (bit 0 = field1, ..., bit 7 = field8), avec 2 décimales.
+  * Exemple : masque 0xFF -> les 8 champs.
+  */
+ts_resultat_t thingspeak_envoyer_champs(const char *cle_ecriture,
+                                       const float champs[TS_NB_CHAMPS],
+                                       uint8_t masque, int32_t *numero);
 
 /**
   * Récupère (et retire) la plus ancienne commande de la file TalkBack.

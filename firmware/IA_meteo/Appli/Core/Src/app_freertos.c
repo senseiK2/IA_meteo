@@ -477,35 +477,11 @@ static void reseau_action(void)
     }
   }
 
-  /* 2. Envoi des mesures. Température du SHT40 : même capteur que
-   *    l'humidité, donc point de rosée cohérent. Pression brute : MATLAB la
-   *    ramène au niveau de la mer. */
-  int32_t numero = 0;
-  uint32_t t0 = osKernelGetTickCount();
-  ts_resultat_t r = thingspeak_envoyer(THINGSPEAK_WRITE_KEY, m.temp_hum_c,
-                                       m.humidity_rh, m.pressure_hpa, &numero);
-  uint32_t duree = osKernelGetTickCount() - t0;
-
-  console_lock();
-  if (r == TS_OK)
-  {
-    printf("  ThingSpeak : ligne %ld enregistree (%lu ms)\r\n",
-           (long)numero, (unsigned long)duree);
-  }
-  else
-  {
-    printf("  ThingSpeak : %s (%lu ms)\r\n", thingspeak_texte(r), (unsigned long)duree);
-  }
-  console_unlock();
-  if (r != TS_OK)
-  {
-    return;
-  }
-
 #if (DEMO_PARTIE == 6)
-  /* 3. Prédiction SUR LA CARTE, avec exactement la même mesure. L'heure
-   *    vient de l'en-tête "Date:" de la réponse de ThingSpeak qu'on vient
-   *    de recevoir. */
+  /* 2. Prédiction SUR LA CARTE, avec la mesure qu'on va envoyer. L'heure
+   *    vient de l'en-tête "Date:" des réponses précédentes de ThingSpeak
+   *    (au tout premier cycle elle est encore inconnue : pas de prédiction,
+   *    on envoie seulement les mesures). */
   float x[METEO_IA_NB_ENTREES];
   float proba[METEO_IA_NB_MODELES][METEO_IA_NB_CLASSES];
   uint32_t epoch = 0U;
@@ -553,7 +529,53 @@ static void reseau_action(void)
   console_unlock();
 #endif
 
-  /* 3. Attente de la prédiction du cloud */
+
+  /* 3. Envoi des mesures. Température du SHT40 : même capteur que
+   *    l'humidité, donc point de rosée cohérent. Pression brute : MATLAB la
+   *    ramène au niveau de la mer. */
+  int32_t numero = 0;
+  uint32_t t0 = osKernelGetTickCount();
+#if (DEMO_PARTIE == 6)
+  /* Démo 6 : on joint les prédictions de la carte, pour la page web
+   * (web/index.html) qui affiche carte et cloud côte à côte :
+   *   field4 / field5 : classe h0 (0..3) et sa confiance (%)
+   *   field6 / field7 : classe h3 (0..3) et sa confiance (%)
+   *   field8          : temps d'inférence du modèle h0 sur la carte (µs) */
+  float champs[TS_NB_CHAMPS] = { m.temp_hum_c, m.humidity_rh, m.pressure_hpa };
+  uint8_t masque = 0x07U;                         /* field1..3 : les mesures */
+  if ((k_carte[METEO_IA_H0] >= 0) && (k_carte[METEO_IA_H3] >= 0))
+  {
+    champs[3] = (float)k_carte[METEO_IA_H0];
+    champs[4] = proba[METEO_IA_H0][k_carte[METEO_IA_H0]] * 100.0f;
+    champs[5] = (float)k_carte[METEO_IA_H3];
+    champs[6] = proba[METEO_IA_H3][k_carte[METEO_IA_H3]] * 100.0f;
+    champs[7] = (float)meteo_ia_cycles_en_us(cycles[METEO_IA_H0]);
+    masque = 0xFFU;                               /* field1..8 */
+  }
+  ts_resultat_t r = thingspeak_envoyer_champs(THINGSPEAK_WRITE_KEY, champs, masque, &numero);
+#else
+  ts_resultat_t r = thingspeak_envoyer(THINGSPEAK_WRITE_KEY, m.temp_hum_c,
+                                       m.humidity_rh, m.pressure_hpa, &numero);
+#endif
+  uint32_t duree = osKernelGetTickCount() - t0;
+
+  console_lock();
+  if (r == TS_OK)
+  {
+    printf("  ThingSpeak : ligne %ld enregistree (%lu ms)\r\n",
+           (long)numero, (unsigned long)duree);
+  }
+  else
+  {
+    printf("  ThingSpeak : %s (%lu ms)\r\n", thingspeak_texte(r), (unsigned long)duree);
+  }
+  console_unlock();
+  if (r != TS_OK)
+  {
+    return;
+  }
+
+  /* 4. Attente de la prédiction du cloud */
   while ((osKernelGetTickCount() - t0) < TB_ATTENTE_MAX_MS)
   {
     osDelay(TB_SCRUTATION_MS);

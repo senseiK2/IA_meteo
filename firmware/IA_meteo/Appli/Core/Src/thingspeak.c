@@ -51,7 +51,7 @@ static bool     s_heure_connue = false;
 
 /* Tampons statiques : ils seraient trop gros pour la pile de la tâche. Une
  * seule tâche (TacheReseau) utilise ce module : pas de conflit. */
-static char s_requete[256];
+static char s_requete[320];
 static char s_reponse[1024];
 
 const char *thingspeak_texte(ts_resultat_t r)
@@ -232,21 +232,29 @@ static ts_resultat_t http_get(int n, const char **corps)
   return TS_OK;
 }
 
-ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
-                                 float temp_c, float humidite_rh,
-                                 float pression_hpa, int32_t *numero)
+ts_resultat_t thingspeak_envoyer_champs(const char *cle_ecriture,
+                                       const float champs[TS_NB_CHAMPS],
+                                       uint8_t masque, int32_t *numero)
 {
-  char t[16], h[16], p[16];
-  flottant_texte(temp_c, t, sizeof(t));
-  flottant_texte(humidite_rh, h, sizeof(h));
-  flottant_texte(pression_hpa, p, sizeof(p));
-
-  /* Chaque ligne se termine par "\r\n" ; une ligne vide marque la fin */
-  int n = snprintf(s_requete, sizeof(s_requete),
-                   "GET /update?api_key=%s&field1=%s&field2=%s&field3=%s HTTP/1.0\r\n"
-                   "Host: " TS_HOTE "\r\n"
-                   "\r\n",
-                   cle_ecriture, t, h, p);
+  /* Construction de "GET /update?api_key=...&field1=21.65&field4=1.00..."
+   * en n'ajoutant que les champs présents (bit i du masque = field i+1) */
+  int n = snprintf(s_requete, sizeof(s_requete), "GET /update?api_key=%s", cle_ecriture);
+  for (int i = 0; (i < TS_NB_CHAMPS) && (n > 0) && (n < (int)sizeof(s_requete)); i++)
+  {
+    if ((masque & (1U << i)) != 0U)
+    {
+      char v[16];
+      flottant_texte(champs[i], v, sizeof(v));
+      n += snprintf(s_requete + n, sizeof(s_requete) - (size_t)n, "&field%d=%s", i + 1, v);
+    }
+  }
+  /* Fin de la requête. Chaque ligne se termine par "\r\n" ; une ligne vide
+   * marque la fin des en-têtes. */
+  if ((n > 0) && (n < (int)sizeof(s_requete)))
+  {
+    n += snprintf(s_requete + n, sizeof(s_requete) - (size_t)n,
+                  " HTTP/1.0\r\nHost: " TS_HOTE "\r\n\r\n");
+  }
   if ((n <= 0) || (n >= (int)sizeof(s_requete)))
   {
     return TS_ERR_ENVOI;
@@ -265,6 +273,14 @@ ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
     *numero = (int32_t)num;
   }
   return (num > 0) ? TS_OK : TS_ERR_REFUS;
+}
+
+ts_resultat_t thingspeak_envoyer(const char *cle_ecriture,
+                                 float temp_c, float humidite_rh,
+                                 float pression_hpa, int32_t *numero)
+{
+  const float champs[TS_NB_CHAMPS] = { temp_c, humidite_rh, pression_hpa };
+  return thingspeak_envoyer_champs(cle_ecriture, champs, 0x07U, numero);  /* field1..3 */
 }
 
 ts_resultat_t thingspeak_talkback_lire(const char *id, const char *cle,
