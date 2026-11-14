@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Station IA météo</title>
+<!--
+  web/index.html - Page de suivi de la démo 6 (TP3).
+
+  Lit les deux canaux ThingSpeak et affiche, pour chaque mesure :
+    - les mesures de la carte (température, humidité, pression) ;
+    - la prédiction calculée SUR LA CARTE (X-CUBE-AI, Cortex-M55) ;
+    - la prédiction calculée DANS LE CLOUD (MATLAB sur ThingSpeak) ;
+    - les temps de réponse des deux, et leur accord.
+
+  Canal 1 "TP3_Meteo_STM32" (écrit par la carte) :
+    field1..3 = température (°C), humidité (%), pression brute (hPa)
+    field4/5  = classe h0 (0..3) / confiance (%)   prédiction de la carte
+    field6/7  = classe h3 (0..3) / confiance (%)
+    field8    = temps d'inférence h0 sur la carte (µs)
+  Canal 2 "TP3_Meteo_Cloud" (écrit par MATLAB, matlab/prediction_meteo.m) :
+    field1/2  = classe h0 / confiance      field3/4 = classe h3 / confiance
+    field5    = numéro de la mesure traitée (entry_id du canal 1)
+    field6    = durée d'exécution du script MATLAB (s)
+
+  Aucune clé n'est écrite dans ce fichier : les identifiants et les clés de
+  lecture sont saisis dans la page et gardés dans le navigateur
+  (localStorage). Il suffit d'ouvrir le fichier dans un navigateur.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fond:      #EEF2F5;   /* papier froid, comme un relevé d'instrument */
+    --surface:   #FFFFFF;
+    --encre:     #18283A;   /* bleu nuit : texte */
+    --encre-2:   #5A6B7D;   /* texte secondaire */
+    --trait:     #D3DCE4;
+    --carte:     #0E7A68;   /* vert du circuit imprimé : l'IA embarquée */
+    --cloud:     #6B6FB5;   /* violet-gris : l'IA dans le cloud */
+    --alerte:    #B54A1F;
+    --c-clair:   #E0A526;
+    --c-nuageux: #8797AB;
+    --c-brouillard: #A9B6C2;
+    --c-precip:  #2F68B1;
+    --rayon:     6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fond:    #0F1B27;
+      --surface: #16253A;
+      --encre:   #E4ECF3;
+      --encre-2: #9AABBC;
+      --trait:   #2A3B50;
+      --carte:   #3CC2A6;
+      --cloud:   #A3A7EC;
+      --alerte:  #F08A5D;
+      --c-nuageux: #A3B2C4;
+      --c-brouillard: #7F8D9B;
+      --c-precip: #6FA2E6;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--fond);
+    color: var(--encre);
+    font: 400 16px/1.5 "Barlow", system-ui, sans-serif;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1, h2, .grand, .chiffre { font-family: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin: 0; }
+  h2 { font-size: 1.15rem; font-weight: 600; margin: 0 0 12px; }
+  p { margin: 0; }
+  button, input { font: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--carte); outline-offset: 2px;
+  }
+
+  /* --- En-tête ---------------------------------------------------------- */
+  header.tete {
+    display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline;
+    justify-content: space-between; margin-bottom: 20px;
+  }
+  .etat { color: var(--encre-2); font-size: .95rem; }
+  .etat .point {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--encre-2); margin-right: 6px; vertical-align: middle;
+  }
+  .etat.ok .point { background: var(--carte); }
+  .etat.erreur { color: var(--alerte); }
+  .etat.erreur .point { background: var(--alerte); }
+  .lien-reglages {
+    background: none; border: 1px solid var(--trait); border-radius: var(--rayon);
+    padding: 4px 12px; cursor: pointer;
+  }
+
+  .bloc { background: var(--surface); border-radius: var(--rayon); padding: 20px; margin-bottom: 16px; }
+
+  /* --- Verdict : les deux prédictions de la dernière mesure ------------- */
+  .verdict { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 32px; }
+  .horizon { border-left: 4px solid var(--trait); padding-left: 16px; }
+  .horizon .quand { color: var(--encre-2); }
+  .grand { font-size: clamp(2rem, 6vw, 3.25rem); font-weight: 700; line-height: 1.05; margin: 2px 0 10px; }
+  .paire { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; font-size: .95rem; }
+  .paire .qui { font-weight: 600; }
+  .paire .qui.carte { color: var(--carte); }
+  .paire .qui.cloud { color: var(--cloud); }
+  .jauge { height: 8px; border-radius: 4px; background: var(--trait); overflow: hidden; }
+  .jauge > span { display: block; height: 100%; border-radius: 4px; }
+  .accord { margin-top: 8px; font-size: .95rem; }
+  .accord.non { color: var(--alerte); }
+
+  /* --- L'élément fort : l'échelle des temps de réponse ------------------- */
+  .echelle-titre { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; align-items: baseline; }
+  .facteur { font-family: "Barlow Semi Condensed", system-ui, sans-serif; font-weight: 700; font-size: clamp(1.6rem, 4.5vw, 2.4rem); }
+  .facteur small { font-size: 1rem; font-weight: 500; color: var(--encre-2); }
+  .echelle { position: relative; height: 92px; margin: 18px 4px 4px; }
+  .echelle .axe { position: absolute; left: 0; right: 0; top: 46px; height: 2px; background: var(--trait); }
+  .echelle .grad { position: absolute; top: 52px; transform: translateX(-50%); font-size: .8rem; color: var(--encre-2); white-space: nowrap; }
+  .echelle .grad::before { content: ""; position: absolute; left: 50%; top: -8px; width: 1px; height: 6px; background: var(--trait); }
+  .echelle .borne { position: absolute; top: 0; transform: translateX(-50%); text-align: center; white-space: nowrap; }
+  .echelle .borne b { display: block; font-family: "Barlow Semi Condensed", system-ui, sans-serif; font-size: 1.1rem; }
+  .echelle .borne i { display: block; width: 14px; height: 14px; border-radius: 50%; margin: 4px auto 0; border: 3px solid var(--surface); }
+  .echelle .borne.carte b { color: var(--carte); }
+  .echelle .borne.carte i { background: var(--carte); }
+  .echelle .borne.cloud b { color: var(--cloud); }
+  .echelle .borne.cloud i { background: var(--cloud); }
+  .note { color: var(--encre-2); font-size: .9rem; margin-top: 10px; max-width: 72ch; }
+
+  /* --- Mesures ----------------------------------------------------------- */
+  .mesures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .mesure .chiffre { font-size: 2rem; font-weight: 600; line-height: 1.1; }
+  .mesure .unite { font-size: 1rem; color: var(--encre-2); margin-left: 2px; }
+  .mesure .detail { color: var(--encre-2); font-size: .9rem; }
+  .mesure svg { display: block; width: 100%; height: 48px; margin-top: 8px; }
+
+  /* --- Historique -------------------------------------------------------- */
+  .stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-bottom: 14px; color: var(--encre-2); }
+  .stats b { color: var(--encre); font-weight: 600; }
+  .tableau { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; min-width: 640px; }
+  th { text-align: left; font-weight: 600; color: var(--encre-2); padding: 6px 8px; border-bottom: 1px solid var(--trait); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--trait); white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .pastille { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+  .diff { color: var(--alerte); font-weight: 600; }
+
+  /* --- Réglages ---------------------------------------------------------- */
+  dialog { border: none; border-radius: var(--rayon); padding: 24px; max-width: 460px; width: calc(100% - 32px); background: var(--surface); color: var(--encre); }
+  dialog::backdrop { background: rgba(15, 27, 39, .55); }
+  dialog label { display: block; font-weight: 500; margin: 12px 0 4px; }
+  dialog input { width: 100%; padding: 8px 10px; border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--fond); }
+  dialog .aide { color: var(--encre-2); font-size: .9rem; margin-top: 8px; }
+  dialog .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+  .bouton { border: none; border-radius: var(--rayon); padding: 8px 16px; cursor: pointer; background: var(--carte); color: #fff; font-weight: 600; }
+  .bouton.secondaire { background: none; color: var(--encre); border: 1px solid var(--trait); }
+
+  .message { padding: 14px 16px; border-radius: var(--rayon); background: var(--surface); border-left: 4px solid var(--alerte); margin-bottom: 16px; }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 720px) {
+    .verdict { grid-template-columns: 1fr; }
+    .mesures { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .echelle .borne { transition: left .6s ease; }
+    .jauge > span { transition: width .6s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="tete">
+    <h1>Station IA météo sur STM32N6</h1>
+    <p class="etat" id="etat"><span class="point"></span>Chargement…</p>
+    <button class="lien-reglages" id="ouvrir-reglages" type="button">Réglages</button>
+  </header>
+
+  <div class="message" id="message" hidden></div>
+
+  <!-- Dernière mesure : les deux prédictions, carte et cloud -->
+  <section class="bloc" aria-labelledby="titre-verdict">
+    <h2 id="titre-verdict">Dernière mesure comparée <span class="etat" id="heure-mesure"></span></h2>
+    <div class="verdict">
+      <div class="horizon" id="h0">
+        <p class="quand">Maintenant</p>
+        <p class="grand" data-role="classe">–</p>
+        <div class="paire" data-role="detail"></div>
+        <p class="accord" data-role="accord"></p>
+      </div>
+      <div class="horizon" id="h3">
+        <p class="quand">Dans 3 heures</p>
+        <p class="grand" data-role="classe">–</p>
+        <div class="paire" data-role="detail"></div>
+        <p class="accord" data-role="accord"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- L'écart de temps de réponse, sur une échelle logarithmique -->
+  <section class="bloc" aria-labelledby="titre-temps">
+    <div class="echelle-titre">
+      <h2 id="titre-temps">Temps de réponse</h2>
+      <p class="facteur" id="facteur">–</p>
+    </div>
+    <div class="echelle" id="echelle" role="img" aria-label="Comparaison des temps de réponse de la carte et du cloud"></div>
+    <p class="note" id="note-temps">Carte : calcul du réseau de neurones sur le Cortex-M55. Cloud : de l'arrivée
+      de la mesure sur ThingSpeak à l'enregistrement de la prédiction par MATLAB.
+      Énergie estimée par prédiction : environ 9 µJ sur la carte, 20 à 70 J dans le cloud
+      (docs/demarche_tp3.md, section 10).</p>
+  </section>
+
+  <!-- Mesures et tendance -->
+  <section class="bloc" aria-labelledby="titre-mesures">
+    <h2 id="titre-mesures">Mesures de la carte</h2>
+    <div class="mesures">
+      <div class="mesure" id="m-temp"></div>
+      <div class="mesure" id="m-hum"></div>
+      <div class="mesure" id="m-pres"></div>
+    </div>
+  </section>
+
+  <!-- Historique -->
+  <section class="bloc" aria-labelledby="titre-historique">
+    <h2 id="titre-historique">Historique</h2>
+    <div class="stats" id="stats"></div>
+    <div class="tableau">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Heure</th>
+            <th scope="col">Temp.</th>
+            <th scope="col">Hum.</th>
+            <th scope="col">Carte maintenant</th>
+            <th scope="col">Cloud maintenant</th>
+            <th scope="col">Carte dans 3 h</th>
+            <th scope="col">Cloud dans 3 h</th>
+            <th scope="col">Carte</th>
+            <th scope="col">Cloud</th>
+          </tr>
+        </thead>
+        <tbody id="lignes"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<dialog id="reglages" aria-labelledby="titre-reglages">
+  <form method="dialog" id="form-reglages">
+    <h2 id="titre-reglages">Accès aux canaux ThingSpeak</h2>
+    <p class="aide">Sur ThingSpeak : page du canal pour le numéro, onglet API Keys pour la clé de lecture.
+      Les valeurs restent dans ce navigateur.</p>
+    <label for="c1">Numéro du canal des mesures (TP3_Meteo_STM32)</label>
+    <input id="c1" name="c1" inputmode="numeric" required>
+    <label for="k1">Clé de lecture de ce canal</label>
+    <input id="k1" name="k1" autocomplete="off" spellcheck="false">
+    <label for="c2">Numéro du canal du cloud (TP3_Meteo_Cloud)</label>
+    <input id="c2" name="c2" inputmode="numeric" required>
+    <label for="k2">Clé de lecture de ce canal</label>
+    <input id="k2" name="k2" autocomplete="off" spellcheck="false">
+    <div class="actions">
+      <button class="bouton secondaire" value="annuler" type="button" id="annuler">Annuler</button>
+      <button class="bouton" value="ok" type="submit">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------------
+ * Constantes du projet (mêmes valeurs que dans ml/config.py et le firmware)
+ * ---------------------------------------------------------------------- */
+const CLASSES = [
+  { nom: "Clair",          couleur: "var(--c-clair)" },
+  { nom: "Nuageux",        couleur: "var(--c-nuageux)" },
+  { nom: "Brouillard",     couleur: "var(--c-brouillard)" },
+  { nom: "Précipitations", couleur: "var(--c-precip)" },
+];
+const ALTITUDE_M = 235;          // altitude de la carte (config.ALTITUDE_CARTE)
+const RAFRAICHISSEMENT_MS = 20000; // la carte envoie une mesure toutes les 20 s
+const NB_MESURES = 100;          // historique lu sur ThingSpeak
+const NB_LIGNES = 12;            // lignes affichées dans le tableau
+const CLE_STOCKAGE = "ia-meteo-reglages";
+
+/* ------------------------------------------------------------------------
+ * Réglages (numéros de canaux, clés de lecture), gardés dans le navigateur
+ * ---------------------------------------------------------------------- */
+function lireReglages() {
+  try { return JSON.parse(localStorage.getItem(CLE_STOCKAGE)) || {}; }
+  catch (e) { return {}; }
+}
+function ecrireReglages(r) {
+  try { localStorage.setItem(CLE_STOCKAGE, JSON.stringify(r)); } catch (e) { /* navigation privée */ }
+}
+let reglages = lireReglages();
+
+const dialogue = document.getElementById("reglages");
+function ouvrirReglages() {
+  for (const k of ["c1", "k1", "c2", "k2"]) document.getElementById(k).value = reglages[k] || "";
+  dialogue.showModal();
+}
+document.getElementById("ouvrir-reglages").addEventListener("click", ouvrirReglages);
+document.getElementById("annuler").addEventListener("click", () => dialogue.close());
+document.getElementById("form-reglages").addEventListener("submit", () => {
+  for (const k of ["c1", "k1", "c2", "k2"]) reglages[k] = document.getElementById(k).value.trim();
+  ecrireReglages(reglages);
+  actualiser();
+});
+
+/* ------------------------------------------------------------------------
+ * Lecture des canaux ThingSpeak (API REST, réponse JSON)
+ * ---------------------------------------------------------------------- */
+async function lireCanal(id, cle) {
+  const url = new URL(`https://api.thingspeak.com/channels/${encodeURIComponent(id)}/feeds.json`);
+  url.searchParams.set("results", NB_MESURES);
+  if (cle) url.searchParams.set("api_key", cle);
+  const rep = await fetch(url);
+  if (!rep.ok) throw new Error(`canal ${id} : réponse HTTP ${rep.status}`);
+  const json = await rep.json();
+  if (json === -1 || !Array.isArray(json.feeds)) throw new Error(`canal ${id} : accès refusé (clé de lecture ?)`);
+  return json.feeds;
+}
+
+const nombre = (v) => (v === null || v === undefined || v === "") ? null : Number(v);
+const classe = (v) => { const k = nombre(v); return (k === null || isNaN(k)) ? null : Math.round(k); };
+
+/* Associe chaque mesure (canal 1) à la prédiction du cloud qui la concerne
+ * (canal 2, field5 = numéro de la mesure). */
+function assembler(mesures, cloud) {
+  const parMesure = new Map();
+  for (const c of cloud) {
+    const n = classe(c.field5);
+    if (n !== null) parMesure.set(n, c);
+  }
+  return mesures.map((m) => {
+    const c = parMesure.get(m.entry_id);
+    const tMesure = new Date(m.created_at);
+    return {
+      n: m.entry_id,
+      date: tMesure,
+      temp: nombre(m.field1), hum: nombre(m.field2), pres: nombre(m.field3),
+      carte: { h0: classe(m.field4), c0: nombre(m.field5), h3: classe(m.field6), c3: nombre(m.field7), us: nombre(m.field8) },
+      cloud: c ? {
+        h0: classe(c.field1), c0: nombre(c.field2), h3: classe(c.field3), c3: nombre(c.field4),
+        matlab_s: nombre(c.field6),
+        latence_s: (new Date(c.created_at) - tMesure) / 1000,
+      } : null,
+    };
+  });
+}
+
+/* ------------------------------------------------------------------------
+ * Petits utilitaires d'affichage
+ * ---------------------------------------------------------------------- */
+const el = (id) => document.getElementById(id);
+const heure = (d) => d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const fmt = (v, dec = 1) => (v === null || isNaN(v)) ? "–" : v.toLocaleString("fr-FR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+const nomClasse = (k) => (k === null || !CLASSES[k]) ? "–" : CLASSES[k].nom;
+const echapper = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function pastille(k) {
+  if (k === null || !CLASSES[k]) return "–";
+  return `<span class="pastille" style="background:${CLASSES[k].couleur}"></span>${CLASSES[k].nom}`;
+}
+
+/* Pression ramenée au niveau de la mer : même formule que la carte et MATLAB */
+function pressionMer(p, t) {
+  if (p === null || t === null) return null;
+  return p * Math.pow(1 - 0.0065 * ALTITUDE_M / (t + 0.0065 * ALTITUDE_M + 273.15), -5.257);
+}
+
+/* Durée lisible : µs, ms ou s */
+function duree(s) {
+  if (s === null || isNaN(s)) return "–";
+  if (s < 1e-3) return `${fmt(s * 1e6, 0)} µs`;
+  if (s < 1) return `${fmt(s * 1e3, s < 0.01 ? 2 : 1)} ms`;
+  return `${fmt(s, 1)} s`;
+}
+
+const moyenne = (t) => t.length ? t.reduce((a, b) => a + b, 0) / t.length : null;
+
+/* ------------------------------------------------------------------------
+ * Affichage
+ * ---------------------------------------------------------------------- */
+function afficherHorizon(id, kCarte, cCarte, kCloud, cCloud) {
+  const bloc = el(id);
+  const k = kCarte !== null ? kCarte : kCloud;
+  bloc.querySelector('[data-role="classe"]').textContent = nomClasse(k);
+  bloc.style.borderLeftColor = (k !== null && CLASSES[k]) ? CLASSES[k].couleur : "var(--trait)";
+
+  const ligne = (qui, libelle, kk, conf) => `
+    <span class="qui ${qui}">${libelle}</span>
+    <span class="jauge" aria-hidden="true"><span style="width:${conf ?? 0}%;background:var(--${qui})"></span></span>
+    <span>${nomClasse(kk)} ${conf !== null ? fmt(conf, 0) + " %" : ""}</span>`;
+  bloc.querySelector('[data-role="detail"]').innerHTML =
+    ligne("carte", "Carte", kCarte, cCarte) + ligne("cloud", "Cloud", kCloud, cCloud);
+
+  const accord = bloc.querySelector('[data-role="accord"]');
+  if (kCarte === null || kCloud === null) {
+    accord.textContent = kCloud === null ? "Réponse du cloud en attente…" : "Pas de prédiction de la carte pour cette mesure.";
+    accord.className = "accord";
+  } else if (kCarte === kCloud) {
+    accord.textContent = "La carte et le cloud donnent la même réponse.";
+    accord.className = "accord";
+  } else {
+    accord.textContent = "La carte et le cloud ne donnent pas la même réponse.";
+    accord.className = "accord non";
+  }
+}
+
+/* Échelle logarithmique de 100 µs à 100 s : chaque graduation = ×10 */
+function afficherEchelle(tCarte, tCloud) {
+  const min = 1e-4, max = 100;
+  const pos = (s) => 100 * (Math.log10(s) - Math.log10(min)) / (Math.log10(max) - Math.log10(min));
+  const grads = [[1e-4, "100 µs"], [1e-3, "1 ms"], [1e-2, "10 ms"], [1e-1, "100 ms"], [1, "1 s"], [10, "10 s"], [100, "100 s"]];
+  let html = '<div class="axe"></div>';
+  for (const [s, txt] of grads) html += `<span class="grad" style="left:${pos(s)}%">${txt}</span>`;
+  if (tCarte) html += `<span class="borne carte" style="left:${pos(tCarte)}%"><b>Carte ${duree(tCarte)}</b><i></i></span>`;
+  if (tCloud) html += `<span class="borne cloud" style="left:${pos(tCloud)}%"><b>Cloud ${duree(tCloud)}</b><i></i></span>`;
+  el("echelle").innerHTML = html;
+  el("facteur").innerHTML = (tCarte && tCloud)
+    ? `${Math.round(tCloud / tCarte).toLocaleString("fr-FR")}× <small>plus rapide sur la carte</small>`
+    : "–";
+}
+
+/* Courbe SVG minimale (sans bibliothèque) */
+function courbe(valeurs, couleur) {
+  const v = valeurs.filter((x) => x !== null && !isNaN(x));
+  if (v.length < 2) return "";
+  const lo = Math.min(...v), hi = Math.max(...v), et = (hi - lo) || 1;
+  const pts = valeurs.map((x, i) => (x === null || isNaN(x)) ? null
+    : `${(100 * i / (valeurs.length - 1)).toFixed(2)},${(44 - 40 * (x - lo) / et).toFixed(2)}`).filter(Boolean);
+  return `<svg viewBox="0 0 100 48" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points="${pts.join(" ")}" fill="none" stroke="${couleur}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function afficherMesure(id, libelle, valeur, unite, dec, detail, serie) {
+  el(id).innerHTML = `<p>${libelle}</p>
+    <p class="chiffre">${fmt(valeur, dec)}<span class="unite">${unite}</span></p>
+    <p class="detail">${detail}</p>${courbe(serie, "var(--encre-2)")}`;
+}
+
+function afficher(donnees) {
+  const recentes = donnees.slice().reverse();          // plus récente d'abord
+  /* La réponse du cloud arrive ~10 s après la mesure : on affiche la mesure
+   * la plus récente qui a déjà les deux prédictions, pour comparer. */
+  const d = recentes.find((x) => x.cloud && x.carte.h0 !== null) || recentes[0];
+  el("heure-mesure").textContent = `n° ${d.n}, ${heure(d.date)}`;
+
+  afficherHorizon("h0", d.carte.h0, d.carte.c0, d.cloud?.h0 ?? null, d.cloud?.c0 ?? null);
+  afficherHorizon("h3", d.carte.h3, d.carte.c3, d.cloud?.h3 ?? null, d.cloud?.c3 ?? null);
+
+  /* Temps : moyenne sur l'historique disponible (plus stable qu'une mesure) */
+  const tCarte = moyenne(donnees.map((x) => x.carte.us).filter((x) => x !== null)) ;
+  const tCloud = moyenne(donnees.map((x) => x.cloud?.latence_s).filter((x) => x !== null && x !== undefined && x > 0));
+  afficherEchelle(tCarte !== null ? tCarte * 1e-6 : null, tCloud);
+
+  const serie = (f) => donnees.map(f);
+  const der = recentes[0];                             // mesures : la toute dernière
+  const pm = pressionMer(der.pres, der.temp);
+  afficherMesure("m-temp", "Température", der.temp, " °C", 1, "Capteur SHT40", serie((x) => x.temp));
+  afficherMesure("m-hum", "Humidité", der.hum, " %", 0, "Capteur SHT40", serie((x) => x.hum));
+  afficherMesure("m-pres", "Pression", der.pres, " hPa", 1,
+                 `${fmt(pm, 1)} hPa au niveau de la mer (altitude ${ALTITUDE_M} m)`, serie((x) => x.pres));
+
+  /* Statistiques d'accord sur les mesures traitées par la carte ET le cloud */
+  const comparables = donnees.filter((x) => x.cloud && x.carte.h0 !== null);
+  const acc0 = comparables.filter((x) => x.carte.h0 === x.cloud.h0).length;
+  const acc3 = comparables.filter((x) => x.carte.h3 === x.cloud.h3).length;
+  const matlab = moyenne(comparables.map((x) => x.cloud.matlab_s).filter((x) => x !== null));
+  el("stats").innerHTML = comparables.length
+    ? `<span>Accord maintenant : <b>${acc0} / ${comparables.length}</b></span>
+       <span>Accord dans 3 h : <b>${acc3} / ${comparables.length}</b></span>
+       <span>Calcul carte moyen : <b>${duree(tCarte !== null ? tCarte * 1e-6 : null)}</b></span>
+       <span>Script MATLAB moyen : <b>${duree(matlab)}</b></span>`
+    : "<span>Aucune mesure n'a encore été traitée par la carte et par le cloud.</span>";
+
+  const diff = (a, b) => (a !== null && b !== null && a !== b) ? ' class="diff"' : "";
+  el("lignes").innerHTML = recentes.slice(0, NB_LIGNES).map((x) => `
+    <tr>
+      <td class="num">${heure(x.date)}</td>
+      <td class="num">${fmt(x.temp, 1)} °C</td>
+      <td class="num">${fmt(x.hum, 0)} %</td>
+      <td>${pastille(x.carte.h0)}</td>
+      <td${diff(x.carte.h0, x.cloud?.h0 ?? null)}>${pastille(x.cloud?.h0 ?? null)}</td>
+      <td>${pastille(x.carte.h3)}</td>
+      <td${diff(x.carte.h3, x.cloud?.h3 ?? null)}>${pastille(x.cloud?.h3 ?? null)}</td>
+      <td class="num">${x.carte.us !== null ? fmt(x.carte.us, 0) + " µs" : "–"}</td>
+      <td class="num">${x.cloud ? duree(x.cloud.latence_s) : "–"}</td>
+    </tr>`).join("");
+}
+
+function etat(texte, classeEtat) {
+  const e = el("etat");
+  e.className = "etat " + (classeEtat || "");
+  e.innerHTML = `<span class="point"></span>${echapper(texte)}`;
+}
+function message(texte) {
+  const m = el("message");
+  m.hidden = !texte;
+  m.textContent = texte || "";
+}
+
+/* ------------------------------------------------------------------------
+ * Boucle principale : lecture des deux canaux toutes les 20 s
+ * ---------------------------------------------------------------------- */
+async function actualiser() {
+  if (!reglages.c1 || !reglages.c2) {
+    etat("Réglages à compléter", "erreur");
+    message("Indique les numéros des deux canaux ThingSpeak et leurs clés de lecture (bouton Réglages).");
+    return;
+  }
+  try {
+    const [mesures, cloud] = await Promise.all([
+      lireCanal(reglages.c1, reglages.k1),
+      lireCanal(reglages.c2, reglages.k2),
+    ]);
+    if (!mesures.length) {
+      etat("Aucune mesure", "erreur");
+      message("Le canal des mesures est vide : la carte est-elle allumée, en démo 6 ?");
+      return;
+    }
+    message("");
+    afficher(assembler(mesures, cloud));
+    etat(`Actualisé à ${heure(new Date())}, prochaine lecture dans 20 s`, "ok");
+  } catch (e) {
+    etat("Lecture impossible", "erreur");
+    message(`Lecture de ThingSpeak impossible (${e.message}). Vérifie les numéros de canaux et les clés de lecture dans Réglages, et la connexion Internet.`);
+  }
+}
+
+actualiser();
+setInterval(actualiser, RAFRAICHISSEMENT_MS);
+if (!reglages.c1 || !reglages.c2) ouvrirReglages();
+</script>
+</body>
+</html>

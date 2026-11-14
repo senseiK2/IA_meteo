@@ -23,6 +23,7 @@ inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
 ├── firmware/
 │   └── IA_meteo/        # Projet STM32CubeIDE : FSBL (démarrage) + Appli (application)
 ├── ml/                  # TP3 : données Meteostat, entraînement TensorFlow, export ONNX/TFLite (voir ml/README.md)
+├── web/                 # Page de suivi de la démo (carte et cloud côte à côte)
 ├── docs/                # Documentation : démarche, choix de conception, logs
 └── README.md
 ```
@@ -141,6 +142,22 @@ supprime) :
 - *Source location* : dossier `X-CUBE-AI` ;
 - *Linker > Libraries* : `:NetworkRuntime1020_CM55_GCC.a`, chemin
   `../Middlewares/ST/AI/Lib`.
+
+## Page de suivi (`web/index.html`)
+
+Page autonome à ouvrir dans un navigateur pendant la démo 6. Elle lit les deux
+canaux ThingSpeak toutes les 20 s et affiche, pour chaque mesure, la
+prédiction de la carte et celle du cloud, leur accord, les temps de réponse sur
+une échelle logarithmique, les mesures et l'historique.
+
+| Canal | Écrit par | Champs |
+|---|---|---|
+| `TP3_Meteo_STM32` | la carte (démo 6) | 1–3 mesures ; 4/5 classe et confiance h0 ; 6/7 classe et confiance h3 ; 8 temps d'inférence h0 (µs) |
+| `TP3_Meteo_Cloud` | MATLAB (`matlab/prediction_meteo.m`) | 1/2 classe et confiance h0 ; 3/4 classe et confiance h3 ; 5 numéro de la mesure ; 6 durée du script (s) |
+
+Aucune clé n'est écrite dans le fichier : au premier lancement, la page demande
+les numéros des canaux et leurs clés de lecture, puis les garde dans le
+navigateur.
 
 ## Après chaque génération de code CubeMX
 
