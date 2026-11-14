@@ -37,10 +37,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "cmsis_os2.h"         /* osKernelGetTickCount : faire avancer l'heure */
 
 #define TS_HOTE        "api.thingspeak.com"
 #define TS_PORT        80
 #define TS_TIMEOUT_MS  5000U    /* attente maximum pour envoyer / recevoir */
+
+/* Heure UTC donnée par le serveur (en-tête HTTP "Date:"), et le tick
+ * FreeRTOS (ms) au moment où on l'a reçue : l'heure actuelle s'en déduit. */
+static uint32_t s_epoch_recu = 0U;      /* secondes depuis le 01/01/1970 UTC */
+static uint32_t s_tick_recu  = 0U;
+static bool     s_heure_connue = false;
 
 /* Tampons statiques : ils seraient trop gros pour la pile de la tâche. Une
  * seule tâche (TacheReseau) utilise ce module : pas de conflit. */
@@ -75,6 +82,64 @@ static void flottant_texte(float v, char *buf, size_t len)
     centi = -centi;
   }
   snprintf(buf, len, "%s%ld.%02ld", signe, (long)(centi / 100), (long)(centi % 100));
+}
+
+/* Nombre de jours entre le 01/01/1970 et une date (algorithme classique
+ * "days from civil" de H. Hinnant, valable pour toutes les dates usuelles) */
+static int32_t jours_depuis_1970(int32_t a, int32_t m, int32_t j)
+{
+  a -= (m <= 2) ? 1 : 0;
+  int32_t ere = (a >= 0 ? a : a - 399) / 400;
+  int32_t ae  = a - ere * 400;                                   /* [0, 399] */
+  int32_t ja  = (153 * (m + ((m > 2) ? -3 : 9)) + 2) / 5 + j - 1; /* [0, 365] */
+  int32_t je  = ae * 365 + ae / 4 - ae / 100 + ja;               /* [0, 146096] */
+  return ere * 146097 + je - 719468;
+}
+
+/* Lit l'en-tête "Date: Sat, 14 Nov 2026 10:50:00 GMT" de la réponse HTTP.
+ * Tout serveur web l'envoie : la carte n'a pas d'horloge réglée, elle
+ * récupère l'heure ici (précision : la seconde). */
+static void lire_date_http(const char *entetes)
+{
+  static const char mois_noms[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  const char *d = strstr(entetes, "\r\nDate: ");
+  if (d == NULL)
+  {
+    d = strstr(entetes, "\r\ndate: ");      /* en-têtes insensibles à la casse */
+  }
+  if (d == NULL)
+  {
+    return;
+  }
+
+  char mois[4] = "";
+  int jour, annee, h, mi, se;
+  if (sscanf(d + 8, "%*3s, %d %3s %d %d:%d:%d", &jour, mois, &annee, &h, &mi, &se) != 6)
+  {
+    return;
+  }
+  const char *pos = strstr(mois_noms, mois);
+  if ((pos == NULL) || (mois[0] == '\0'))
+  {
+    return;
+  }
+  int m = (int)((pos - mois_noms) / 3) + 1;
+
+  s_epoch_recu = (uint32_t)jours_depuis_1970(annee, m, jour) * 86400U
+               + (uint32_t)(h * 3600 + mi * 60 + se);
+  s_tick_recu = osKernelGetTickCount();
+  s_heure_connue = true;
+}
+
+bool thingspeak_heure_utc(uint32_t *epoch)
+{
+  if (!s_heure_connue)
+  {
+    return false;
+  }
+  /* heure reçue + temps écoulé depuis (tick FreeRTOS en ms) */
+  *epoch = s_epoch_recu + (osKernelGetTickCount() - s_tick_recu) / 1000U;
+  return true;
 }
 
 /**
@@ -162,6 +227,7 @@ static ts_resultat_t http_get(int n, const char **corps)
   {
     return TS_ERR_REPONSE;
   }
+  lire_date_http(s_reponse);           /* au passage : mise à l'heure */
   *corps = fin_entetes + 4;
   return TS_OK;
 }

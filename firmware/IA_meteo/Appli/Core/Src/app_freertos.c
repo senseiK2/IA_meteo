@@ -15,6 +15,9 @@
   *     5 -> TacheCapteurs + TacheIA : réseau de neurones exécuté SUR LA
   *          CARTE (TP3.3), code généré par X-CUBE-AI. Pour l'instant :
   *          auto-test sur les vecteurs de test de Python et temps de calcul.
+  *     6 -> démo finale cloud / edge (TP3.3c) : comme la démo 4, mais la
+  *          carte calcule AUSSI sa propre prédiction sur la même mesure, puis
+  *          compare sa réponse et son temps à ceux du cloud.
   *
   *   Les deux tâches se partagent les dernières mesures par une "boîte aux
   *   lettres" protégée par un mutex (mesures_publier / mesures_lire).
@@ -42,6 +45,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "main.h"
 #include "led.h"
 #include "sensors.h"
@@ -60,7 +64,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* ===== Choix de la démo (voir l'en-tête du fichier) ===== */
-#define DEMO_PARTIE        5
+#define DEMO_PARTIE        6
 
 #define CHENILLARD_MS      3000U   /* partie 1 : temporisation imposée de 3 s     */
 #define SENSOR_PERIOD_MS   5000U   /* partie 2 : une lecture des capteurs / 5 s   */
@@ -73,13 +77,13 @@
 #define TB_SCRUTATION_MS   2000U   /* TalkBack : on regarde la file toutes les 2 s */
 #define TB_ATTENTE_MAX_MS  30000U  /* ... pendant 30 s au plus après l'envoi      */
 
-#if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 5)
-#error "DEMO_PARTIE doit valoir 1, 2, 3, 4 ou 5"
+#if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 6)
+#error "DEMO_PARTIE doit valoir 1 a 6"
 #endif
 
 /* La clé API ThingSpeak est dans secrets.h, absent de GitHub (.gitignore).
  * __has_include permet d'afficher un message clair s'il manque. */
-#if (DEMO_PARTIE == 4)
+#if (DEMO_PARTIE == 4) || (DEMO_PARTIE == 6)
 #if __has_include("secrets.h")
 #include "secrets.h"
 #else
@@ -210,7 +214,7 @@ void MX_FREERTOS_Init(void) {
   TacheCapteursHandle = osThreadNew(TacheCapteurs, NULL, &TacheCapteurs_attributes);
   ok = (TacheCapteursHandle != NULL);
 #endif
-#if (DEMO_PARTIE == 3) || (DEMO_PARTIE == 4)
+#if (DEMO_PARTIE == 3) || (DEMO_PARTIE == 4) || (DEMO_PARTIE == 6)
   TacheReseauHandle = osThreadNew(TacheReseau, NULL, &TacheReseau_attributes);
   ok = ok && (TacheReseauHandle != NULL);
 #endif
@@ -226,6 +230,8 @@ void MX_FREERTOS_Init(void) {
   printf("  Demo : TP3.2, envoi des mesures sur ThingSpeak\r\n");
 #elif (DEMO_PARTIE == 5)
   printf("  Demo : TP3.3, reseau de neurones sur la carte\r\n");
+#elif (DEMO_PARTIE == 6)
+  printf("  Demo : TP3.3c, comparaison IA sur la carte / IA dans le cloud\r\n");
 #else
   printf("  Demo : partie %d du TP2\r\n", DEMO_PARTIE);
 #endif/* USER CODE END RTOS_THREADS */
@@ -399,7 +405,42 @@ static void reseau_action(void)
 }
 #define RESEAU_PERIODE_MS  PING_PERIOD_MS
 
-#elif (DEMO_PARTIE == 4)
+#elif (DEMO_PARTIE == 4) || (DEMO_PARTIE == 6)
+#if (DEMO_PARTIE == 6)
+/* Écrit v avec une décimale ("1012.3"), sans printf flottant */
+static void fx1(float v, char *buf, size_t len)
+{
+  int32_t d = (int32_t)(v * 10.0f + ((v >= 0.0f) ? 0.5f : -0.5f));
+  snprintf(buf, len, "%s%ld.%01ld", (d < 0) ? "-" : "",
+           (long)(((d < 0) ? -d : d) / 10), (long)(((d < 0) ? -d : d) % 10));
+}
+
+/* Extrait la classe du modèle h0 de la réponse du cloud
+ * "h0=Nuageux,64;h3=Precipitations,55" -> "Nuageux" */
+static bool classe_cloud_h0(const char *commande, char *classe, size_t taille)
+{
+  const char *debut = strstr(commande, "h0=");
+  if (debut == NULL)
+  {
+    return false;
+  }
+  debut += 3;
+  size_t n = 0;
+  while ((debut[n] != ',') && (debut[n] != ';') && (debut[n] != '\0') && (n < taille - 1U))
+  {
+    classe[n] = debut[n];
+    n++;
+  }
+  classe[n] = '\0';
+  return n > 0U;
+}
+
+/* Bilan depuis le démarrage : combien de fois la carte et le cloud ont
+ * donné la même classe */
+static uint32_t s_nb_comparaisons = 0U;
+static uint32_t s_nb_accords = 0U;
+#endif
+
 /* TP3.2 : envoie les dernières mesures sur le canal ThingSpeak, puis attend
  * la prédiction que MATLAB dépose dans la file TalkBack.
  *
@@ -457,6 +498,41 @@ static void reseau_action(void)
     return;
   }
 
+#if (DEMO_PARTIE == 6)
+  /* 3. Prédiction SUR LA CARTE, avec exactement la même mesure. L'heure
+   *    vient de l'en-tête "Date:" de la réponse de ThingSpeak qu'on vient
+   *    de recevoir. */
+  float x[METEO_IA_NB_ENTREES];
+  float proba[METEO_IA_NB_CLASSES];
+  uint32_t epoch = 0U;
+  uint32_t cycles = 0U;
+  int k_carte = -1;
+  if (thingspeak_heure_utc(&epoch))
+  {
+    meteo_ia_calculer_entrees(m.temp_hum_c, m.humidity_rh, m.pressure_hpa, epoch, x);
+    k_carte = meteo_ia_predire(x, proba, &cycles);
+  }
+
+  console_lock();
+  if (k_carte >= 0)
+  {
+    char pmer[16], ecart[16];
+    fx1(x[METEO_IA_E_PRES], pmer, sizeof(pmer));
+    fx1(x[METEO_IA_E_ECART_ROSEE], ecart, sizeof(ecart));
+    printf("  Entrees carte    : P mer %s hPa, ecart rosee %s, heure UTC %02lu:%02lu\r\n",
+           pmer, ecart, (unsigned long)((epoch % 86400U) / 3600U),
+           (unsigned long)((epoch % 3600U) / 60U));
+    printf("  Prediction carte : %s (%lu %%) en %lu us\r\n", meteo_ia_classe(k_carte),
+           (unsigned long)(proba[k_carte] * 100.0f + 0.5f),
+           (unsigned long)meteo_ia_cycles_en_us(cycles));
+  }
+  else
+  {
+    printf("  Prediction carte : impossible (heure inconnue ou erreur du reseau)\r\n");
+  }
+  console_unlock();
+#endif
+
   /* 3. Attente de la prédiction du cloud */
   while ((osKernelGetTickCount() - t0) < TB_ATTENTE_MAX_MS)
   {
@@ -470,8 +546,23 @@ static void reseau_action(void)
     console_lock();
     if (r == TS_OK)
     {
+      uint32_t latence = osKernelGetTickCount() - t0;
       printf("  Prediction cloud : %s (recue %lu ms apres l'envoi)\r\n",
-             commande, (unsigned long)(osKernelGetTickCount() - t0));
+             commande, (unsigned long)latence);
+#if (DEMO_PARTIE == 6)
+      char classe_cloud[24];
+      if ((k_carte >= 0) && classe_cloud_h0(commande, classe_cloud, sizeof(classe_cloud)))
+      {
+        bool accord = (strcmp(classe_cloud, meteo_ia_classe(k_carte)) == 0);
+        s_nb_comparaisons++;
+        s_nb_accords += accord ? 1U : 0U;
+        printf("  => carte : %s en %lu us | cloud : %s en %lu ms | %s (%lu/%lu)\r\n",
+               meteo_ia_classe(k_carte), (unsigned long)meteo_ia_cycles_en_us(cycles),
+               classe_cloud, (unsigned long)latence,
+               accord ? "ACCORD" : "DESACCORD",
+               (unsigned long)s_nb_accords, (unsigned long)s_nb_comparaisons);
+      }
+#endif
     }
     else
     {
@@ -485,7 +576,7 @@ static void reseau_action(void)
 #define RESEAU_PERIODE_MS  TS_PERIOD_MS
 #endif
 
-#if (DEMO_PARTIE == 3) || (DEMO_PARTIE == 4)
+#if (DEMO_PARTIE == 3) || (DEMO_PARTIE == 4) || (DEMO_PARTIE == 6)
 /**
   * @brief  Démarre LwIP, attend l'IP du DHCP, puis fait l'action réseau de
   *         la démo (ping ou ThingSpeak) à intervalle régulier.
@@ -494,6 +585,19 @@ static void reseau_action(void)
 void TacheReseau(void *argument)
 {
   (void)argument;
+
+#if (DEMO_PARTIE == 6)
+  /* Le réseau de neurones est prêt avant le réseau Ethernet : on vérifie
+   * d'abord qu'il donne les mêmes réponses que Python. */
+  if (meteo_ia_init())
+  {
+    meteo_ia_autotest();
+  }
+  else
+  {
+    log_etat("IA : initialisation du reseau impossible");
+  }
+#endif
 
   reseau_init();                       /* LwIP + Ethernet + DHCP (app_ethernet.c) */
 

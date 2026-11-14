@@ -56,7 +56,7 @@ le modèle d'IA). En mode développement, le débogueur charge Appli directement
 Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 
 ```c
-#define DEMO_PARTIE        5
+#define DEMO_PARTIE        6
 ```
 
 | Valeur | Ce qui tourne | LEDs |
@@ -66,8 +66,9 @@ Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 | `3` | Capteurs + réseau : DHCP, ping google.com toutes les 10 s | + bleu = communication réseau |
 | `4` | Capteurs + envoi des mesures sur ThingSpeak toutes les 20 s (TP3.2) | + bleu = communication réseau |
 | `5` | Capteurs + réseau de neurones exécuté sur la carte (TP3.3) : auto-test et temps de calcul | rouge / vert |
+| `6` | Démo finale (TP3.3c) : chaque mesure est classée sur la carte **et** dans le cloud, réponses et temps comparés | + bleu = communication réseau |
 
-**Démo 4 : clé ThingSpeak.** Copier `Appli/Core/Inc/secrets_exemple.h` en
+**Démos 4 et 6 : clés ThingSpeak.** Copier `Appli/Core/Inc/secrets_exemple.h` en
 `Appli/Core/Inc/secrets.h` et y mettre la *Write API Key* du canal.
 `secrets.h` est exclu du dépôt (`.gitignore`) : la clé ne doit jamais être
 publiée. Sans ce fichier, la compilation s'arrête avec un message explicite.

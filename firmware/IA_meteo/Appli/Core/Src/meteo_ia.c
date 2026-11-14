@@ -27,10 +27,13 @@
 #include "meteo_h0_data.h"
 #include "console.h"
 #include "stm32n6xx_hal.h"
+#include <math.h>
 #include <stdio.h>
 
 _Static_assert(METEO_H0_NB_ENTREES == METEO_IA_NB_ENTREES, "nombre d'entrees");
 _Static_assert(METEO_H0_NB_CLASSES == METEO_IA_NB_CLASSES, "nombre de classes");
+_Static_assert(METEO_H0_E_PRES == METEO_IA_E_PRES, "indice pression");
+_Static_assert(METEO_H0_E_ECART_ROSEE == METEO_IA_E_ECART_ROSEE, "indice ecart rosee");
 _Static_assert(AI_METEO_H0_IN_1_SIZE == METEO_IA_NB_ENTREES, "entree du reseau genere");
 _Static_assert(AI_METEO_H0_OUT_1_SIZE == METEO_IA_NB_CLASSES, "sortie du reseau genere");
 
@@ -133,6 +136,58 @@ int meteo_ia_predire(const float entrees[METEO_IA_NB_ENTREES],
     }
   }
   return meilleure;
+}
+
+/* Constantes de Magnus (comme ml/meteo_features.py) */
+#define MAGNUS_A  17.62f
+#define MAGNUS_B  243.12f
+#define PI_F      3.14159265f
+
+static bool bissextile(uint32_t a)
+{
+  return ((a % 4U == 0U) && (a % 100U != 0U)) || (a % 400U == 0U);
+}
+
+void meteo_ia_calculer_entrees(float temp_c, float humidite_rh,
+                               float pression_hpa, uint32_t epoch_utc,
+                               float entrees[METEO_IA_NB_ENTREES])
+{
+  /* Pression au niveau de la mer (formule hypsométrique) : Meteostat donne
+   * la pression au niveau de la mer, la carte la mesure à son altitude. */
+  const float h = METEO_H0_ALTITUDE_M;
+  float pres = pression_hpa *
+               powf(1.0f - 0.0065f * h / (temp_c + 0.0065f * h + 273.15f), -5.257f);
+
+  /* Écart au point de rosée (formule de Magnus) */
+  float rh = fminf(fmaxf(humidite_rh, 1.0f), 100.0f) / 100.0f;
+  float g = logf(rh) + MAGNUS_A * temp_c / (MAGNUS_B + temp_c);
+  float rosee = MAGNUS_B * g / (MAGNUS_A - g);
+
+  /* Heure UTC et jour de l'année (0 = 1er janvier) à partir de l'epoch */
+  uint32_t jours = epoch_utc / 86400U;
+  uint32_t secondes = epoch_utc % 86400U;
+  uint32_t annee = 1970U;
+  for (;;)
+  {
+    uint32_t n = bissextile(annee) ? 366U : 365U;
+    if (jours < n)
+    {
+      break;
+    }
+    jours -= n;
+    annee++;
+  }
+  float heure = (float)(secondes / 3600U) + (float)((secondes % 3600U) / 60U) / 60.0f;
+  float jour = (float)jours;
+
+  entrees[METEO_H0_E_TEMP]        = temp_c;
+  entrees[METEO_H0_E_RHUM]        = humidite_rh;
+  entrees[METEO_H0_E_PRES]        = pres;
+  entrees[METEO_H0_E_ECART_ROSEE] = temp_c - rosee;
+  entrees[METEO_H0_E_HEURE_SIN]   = sinf(2.0f * PI_F * heure / 24.0f);
+  entrees[METEO_H0_E_HEURE_COS]   = cosf(2.0f * PI_F * heure / 24.0f);
+  entrees[METEO_H0_E_JOUR_SIN]    = sinf(2.0f * PI_F * jour / 365.25f);
+  entrees[METEO_H0_E_JOUR_COS]    = cosf(2.0f * PI_F * jour / 365.25f);
 }
 
 /* Écrit une probabilité en pourcentage avec une décimale ("43.3"), sans

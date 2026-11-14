@@ -22,6 +22,8 @@
  * tableaux) */
 #define METEO_IA_NB_ENTREES  8
 #define METEO_IA_NB_CLASSES  4
+#define METEO_IA_E_PRES          2   /* indice de la pression (niveau de la mer) */
+#define METEO_IA_E_ECART_ROSEE   3   /* indice de l'écart au point de rosée      */
 
 /* Crée et initialise le réseau. À appeler une fois, avant tout le reste. */
 bool meteo_ia_init(void);
@@ -39,6 +41,18 @@ bool meteo_ia_init(void);
   */
 int meteo_ia_predire(const float entrees[METEO_IA_NB_ENTREES],
                      float proba[METEO_IA_NB_CLASSES], uint32_t *cycles);
+
+/**
+  * Calcule les 8 entrées du modèle à partir des mesures de la carte et de
+  * l'heure, avec les MÊMES formules que ml/meteo_features.py et
+  * matlab/prediction_meteo.m :
+  *   pression ramenée au niveau de la mer, écart au point de rosée (Magnus),
+  *   heure et jour de l'année placés sur un cercle (sinus, cosinus).
+  * @param epoch_utc  heure UTC en secondes depuis le 01/01/1970
+  */
+void meteo_ia_calculer_entrees(float temp_c, float humidite_rh,
+                               float pression_hpa, uint32_t epoch_utc,
+                               float entrees[METEO_IA_NB_ENTREES]);
 
 /* Nom d'une classe ("Clair"...) */
 const char *meteo_ia_classe(int k);
