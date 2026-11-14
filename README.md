@@ -56,7 +56,7 @@ le modèle d'IA). En mode développement, le débogueur charge Appli directement
 Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 
 ```c
-#define DEMO_PARTIE        4
+#define DEMO_PARTIE        5
 ```
 
 | Valeur | Ce qui tourne | LEDs |
@@ -65,6 +65,7 @@ Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 | `2` | Lecture des 3 capteurs toutes les 5 s | rouge = lecture, vert = en attente |
 | `3` | Capteurs + réseau : DHCP, ping google.com toutes les 10 s | + bleu = communication réseau |
 | `4` | Capteurs + envoi des mesures sur ThingSpeak toutes les 20 s (TP3.2) | + bleu = communication réseau |
+| `5` | Capteurs + réseau de neurones exécuté sur la carte (TP3.3) : auto-test et temps de calcul | rouge / vert |
 
 **Démo 4 : clé ThingSpeak.** Copier `Appli/Core/Inc/secrets_exemple.h` en
 `Appli/Core/Inc/secrets.h` et y mettre la *Write API Key* du canal.
@@ -105,6 +106,37 @@ MCU GCC Compiler > Include paths*). Si une génération CubeMX les supprime, les
 ../Middlewares/Third_Party/LwIP/system
 ../Drivers/BSP/Components/lan8742
 ```
+
+## IA embarquée (X-CUBE-AI)
+
+Le réseau de neurones est converti en C par **X-CUBE-AI 10.2.0** (ST Edge AI
+Core 2.2.0) en ligne de commande, à partir du modèle ONNX. Il n'est pas
+intégré par CubeMX : dans ce projet à trois contextes, CubeMX rattache le pack
+au contexte *External Memory Loader*, et une régénération complète mettrait en
+risque l'intégration manuelle de LwIP.
+
+```bat
+set STEDGEAI=%USERPROFILE%\STM32Cube\Repository\Packs\STMicroelectronics\X-CUBE-AI\10.2.0\Utilities\windows\stedgeai.exe
+"%STEDGEAI%" analyze  -m ml\models\export\modele_meteo_h0.onnx --target stm32n6 --name meteo_h0
+"%STEDGEAI%" generate -m ml\models\export\modele_meteo_h0.onnx --target stm32n6 --name meteo_h0 -o st_ai_output\h0
+```
+
+| Élément | Emplacement |
+|---|---|
+| Réseau généré (`meteo_h0*.c/.h`, rapport de génération) | `Appli/X-CUBE-AI/App` |
+| Bibliothèque d'exécution Cortex-M55 et ses en-têtes | `Appli/Middlewares/ST/AI` |
+| Normalisation, classes, vecteurs de test (généré par `ml/04_exporter.py`) | `Appli/Core/Inc/meteo_modele_h0.h` |
+| Appel du réseau, chronométrage, auto-test | `Appli/Core/Src/meteo_ia.c` |
+
+Le réseau (484 paramètres, 576 multiplications-additions, 128 octets de
+mémoire de travail) tourne sur le Cortex-M55 en flottant 32 bits.
+
+Réglages ajoutés au projet Appli (à remettre si une génération CubeMX les
+supprime) :
+- *Include paths* : `../X-CUBE-AI/App`, `../Middlewares/ST/AI/Inc` ;
+- *Source location* : dossier `X-CUBE-AI` ;
+- *Linker > Libraries* : `:NetworkRuntime1020_CM55_GCC.a`, chemin
+  `../Middlewares/ST/AI/Lib`.
 
 ## Après chaque génération de code CubeMX
 

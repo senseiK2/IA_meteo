@@ -12,6 +12,9 @@
   *     4 -> TacheCapteurs + TacheReseau : envoi des mesures sur ThingSpeak
   *          toutes les 20 s, puis attente de la prédiction calculée par
   *          MATLAB dans le cloud et renvoyée par TalkBack (TP3.2), LED bleue
+  *     5 -> TacheCapteurs + TacheIA : réseau de neurones exécuté SUR LA
+  *          CARTE (TP3.3), code généré par X-CUBE-AI. Pour l'instant :
+  *          auto-test sur les vecteurs de test de Python et temps de calcul.
   *
   *   Les deux tâches se partagent les dernières mesures par une "boîte aux
   *   lettres" protégée par un mutex (mesures_publier / mesures_lire).
@@ -46,6 +49,7 @@
 #include "net_ping.h"
 #include "console.h"
 #include "thingspeak.h"
+#include "meteo_ia.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,7 +60,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* ===== Choix de la démo (voir l'en-tête du fichier) ===== */
-#define DEMO_PARTIE        4
+#define DEMO_PARTIE        5
 
 #define CHENILLARD_MS      3000U   /* partie 1 : temporisation imposée de 3 s     */
 #define SENSOR_PERIOD_MS   5000U   /* partie 2 : une lecture des capteurs / 5 s   */
@@ -69,8 +73,8 @@
 #define TB_SCRUTATION_MS   2000U   /* TalkBack : on regarde la file toutes les 2 s */
 #define TB_ATTENTE_MAX_MS  30000U  /* ... pendant 30 s au plus après l'envoi      */
 
-#if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 4)
-#error "DEMO_PARTIE doit valoir 1, 2, 3 ou 4"
+#if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 5)
+#error "DEMO_PARTIE doit valoir 1, 2, 3, 4 ou 5"
 #endif
 
 /* La clé API ThingSpeak est dans secrets.h, absent de GitHub (.gitignore).
@@ -125,6 +129,14 @@ const osThreadAttr_t TacheReseau_attributes = {
   .stack_size = 1024 * 4
 };
 
+/* --- TacheIA (démo 5) : réseau de neurones embarqué -------------------- */
+osThreadId_t TacheIAHandle;
+const osThreadAttr_t TacheIA_attributes = {
+  .name       = "TacheIA",
+  .priority   = (osPriority_t) osPriorityNormal,
+  .stack_size = 1024 * 4
+};
+
 static sensors_data_t s_data;
 
 /* Boîte aux lettres : dernières mesures lues par TacheCapteurs, utilisées
@@ -149,6 +161,7 @@ const osThreadAttr_t defaultTask_attributes = {
 void TacheChenillard(void *argument);
 void TacheCapteurs(void *argument);
 void TacheReseau(void *argument);
+void TacheIA(void *argument);
 static void log_etat(const char *etat);
 static void mesures_publier(const sensors_data_t *m);
 __attribute__((unused)) static bool mesures_lire(sensors_data_t *m);  /* démo 4 seulement */
@@ -197,9 +210,13 @@ void MX_FREERTOS_Init(void) {
   TacheCapteursHandle = osThreadNew(TacheCapteurs, NULL, &TacheCapteurs_attributes);
   ok = (TacheCapteursHandle != NULL);
 #endif
-#if (DEMO_PARTIE >= 3)
+#if (DEMO_PARTIE == 3) || (DEMO_PARTIE == 4)
   TacheReseauHandle = osThreadNew(TacheReseau, NULL, &TacheReseau_attributes);
   ok = ok && (TacheReseauHandle != NULL);
+#endif
+#if (DEMO_PARTIE == 5)
+  TacheIAHandle = osThreadNew(TacheIA, NULL, &TacheIA_attributes);
+  ok = ok && (TacheIAHandle != NULL);
 #endif
   if (!ok)
   {
@@ -207,6 +224,8 @@ void MX_FREERTOS_Init(void) {
   }
 #if (DEMO_PARTIE == 4)
   printf("  Demo : TP3.2, envoi des mesures sur ThingSpeak\r\n");
+#elif (DEMO_PARTIE == 5)
+  printf("  Demo : TP3.3, reseau de neurones sur la carte\r\n");
 #else
   printf("  Demo : partie %d du TP2\r\n", DEMO_PARTIE);
 #endif/* USER CODE END RTOS_THREADS */
@@ -466,7 +485,7 @@ static void reseau_action(void)
 #define RESEAU_PERIODE_MS  TS_PERIOD_MS
 #endif
 
-#if (DEMO_PARTIE >= 3)
+#if (DEMO_PARTIE == 3) || (DEMO_PARTIE == 4)
 /**
   * @brief  Démarre LwIP, attend l'IP du DHCP, puis fait l'action réseau de
   *         la démo (ping ou ThingSpeak) à intervalle régulier.
@@ -498,6 +517,36 @@ void TacheReseau(void *argument)
     }
 
     osDelay(RESEAU_PERIODE_MS);
+  }
+}
+#endif
+
+/* ========================================================================= */
+/* TP3.3 : réseau de neurones sur la carte                                    */
+/* ========================================================================= */
+#if (DEMO_PARTIE == 5)
+/**
+  * @brief  Initialise le réseau généré par X-CUBE-AI puis vérifie qu'il
+  *         donne les mêmes réponses que Python sur les vecteurs de test.
+  */
+void TacheIA(void *argument)
+{
+  (void)argument;
+
+  if (!meteo_ia_init())
+  {
+    log_etat("IA : initialisation du reseau impossible");
+    for (;;)
+    {
+      osDelay(1000);
+    }
+  }
+  log_etat("IA : reseau meteo_h0 pret (X-CUBE-AI, Cortex-M55)");
+  meteo_ia_autotest();
+
+  for (;;)
+  {
+    osDelay(1000);
   }
 }
 #endif
