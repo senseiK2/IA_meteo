@@ -1,8 +1,16 @@
 # ETRS923 – IA embarquée pour la prédiction météo sur STM32N6
 
-Projet de Master 2 (Université Savoie Mont Blanc) : acquisition de grandeurs
-météo via la carte capteurs X-NUCLEO-IKS01A3, communication réseau, puis
-inférence d'un modèle d'IA sur la NUCLEO-N657X0-Q (NPU Neural-ART).
+Projet réalisé dans le cadre du Master 2, semestre 9 (Université Savoie Mont
+Blanc, module ETRS923 « IA et Objets Connectés ») : acquisition de grandeurs
+météo via la carte capteurs X-NUCLEO-IKS4A1, envoi sur le cloud (ThingSpeak +
+MATLAB), puis prédiction de la météo par un réseau de neurones exécuté sur la
+NUCLEO-N657X0-Q (Cortex-M55) et comparée à celle du cloud.
+
+## Équipe
+
+- Kherradji Yacine
+- Trimech Wadah
+- Trache Aris
 
 ## Matériel
 
