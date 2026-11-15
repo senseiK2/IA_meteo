@@ -11,7 +11,9 @@
     - les mesures de la carte (température, humidité, pression) ;
     - la prédiction calculée SUR LA CARTE (X-CUBE-AI, Cortex-M55) ;
     - la prédiction calculée DANS LE CLOUD (MATLAB sur ThingSpeak) ;
-    - les temps de réponse des deux, et leur accord.
+    - les temps de réponse des deux, et leur accord ;
+    - en bandeau, une scène animée (soleil, nuages, brouillard, pluie ou
+      neige, de jour ou de nuit) tirée de la prédiction de la carte.
 
   Canal 1 "TP3_Meteo_STM32" (écrit par la carte) :
     field1..3 = température (°C), humidité (%), pression brute (hPa)
@@ -162,7 +164,26 @@
   .message { padding: 14px 16px; border-radius: var(--rayon); background: var(--surface); border-left: 4px solid var(--alerte); margin-bottom: 16px; }
   [hidden] { display: none !important; }
 
+  /* --- Bandeau animé : la météo prédite par la carte --------------------- */
+  .bandeau { position: relative; height: 300px; border-radius: var(--rayon); overflow: hidden; margin-bottom: 16px; background: #8EA3B8; }
+  .bandeau canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .bandeau-texte { position: absolute; left: 24px; bottom: 22px; right: 200px; text-shadow: 0 1px 12px rgba(0, 0, 0, .18); }
+  .bandeau-texte p { margin: 0; }
+  .bandeau-qui { font-size: 1rem; font-weight: 500; opacity: .9; }
+  .bandeau-temp { font-family: "Barlow Semi Condensed", system-ui, sans-serif; font-weight: 600; font-size: clamp(3.5rem, 11vw, 6rem); line-height: .95; }
+  .bandeau-classe { font-family: "Barlow Semi Condensed", system-ui, sans-serif; font-size: clamp(1.35rem, 3.6vw, 1.9rem); font-weight: 600; }
+  .bandeau-classe span { font-weight: 500; opacity: .85; font-size: .8em; }
+  .bandeau-mini { position: absolute; right: 16px; top: 16px; width: 168px; height: 112px; border-radius: var(--rayon);
+                  overflow: hidden; box-shadow: 0 0 0 2px rgba(255, 255, 255, .55); }
+  .bandeau-mini p { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 3px 8px;
+                    background: rgba(15, 27, 39, .55); color: #fff; font-size: .82rem; line-height: 1.25; }
+  .bandeau-mini b { font-weight: 600; }
+
   @media (max-width: 720px) {
+    .bandeau { height: 260px; }
+    .bandeau-texte { left: 16px; right: 16px; bottom: 16px; }
+    .bandeau-mini { width: 132px; height: 88px; right: 12px; top: 12px; }
+    .bandeau-mini p { font-size: .75rem; }
     .verdict { grid-template-columns: 1fr; }
     .mesures { grid-template-columns: 1fr; }
   }
@@ -182,6 +203,20 @@
   </header>
 
   <div class="message" id="message" hidden></div>
+
+  <!-- Bandeau animé : la météo que prédit l'IA de la carte -->
+  <section class="bandeau" aria-labelledby="b-qui">
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <div class="bandeau-texte" id="bandeau-texte">
+      <p class="bandeau-qui" id="b-qui">Selon l'IA de la carte, maintenant</p>
+      <p class="bandeau-temp" id="b-temp">–</p>
+      <p class="bandeau-classe" id="b-classe">En attente de mesures</p>
+    </div>
+    <div class="bandeau-mini">
+      <canvas id="scene-h3" aria-hidden="true"></canvas>
+      <p>Dans 3 h : <b id="b-h3">–</b></p>
+    </div>
+  </section>
 
   <!-- Dernière mesure : les deux prédictions, carte et cloud -->
   <section class="bloc" aria-labelledby="titre-verdict">
@@ -464,6 +499,8 @@ function afficher(donnees) {
 
   const serie = (f) => donnees.map(f);
   const der = recentes[0];                             // mesures : la toute dernière
+  /* Bandeau : la prédiction la plus récente de la carte (sans attendre le cloud) */
+  afficherBandeau(recentes.find((x) => x.carte.h0 !== null));
   const pm = pressionMer(der.pres, der.temp);
   afficherMesure("m-temp", "Température", der.temp, " °C", 1, "Capteur SHT40", serie((x) => x.temp));
   afficherMesure("m-hum", "Humidité", der.hum, " %", 0, "Capteur SHT40", serie((x) => x.hum));
@@ -506,6 +543,280 @@ function message(texte) {
   const m = el("message");
   m.hidden = !texte;
   m.textContent = texte || "";
+}
+
+/* ------------------------------------------------------------------------
+ * Scène météo animée (bandeau du haut), pilotée par la prédiction de la
+ * carte. Dessin sur <canvas> : ciel, montagnes (on est à Chambéry), puis
+ * selon la classe : soleil ou lune et étoiles, nuages, brouillard, pluie ou
+ * neige (précipitations sous 1 °C).
+ * ---------------------------------------------------------------------- */
+const LATITUDE = 45.64, LONGITUDE = 5.87;   // station Chambéry-Aix
+
+/* Hauteur du soleil (degrés) à une date : formule astronomique simplifiée,
+ * précise à un ou deux degrés près, suffisante pour savoir s'il fait jour. */
+function hauteurSoleil(date) {
+  const rad = Math.PI / 180;
+  const debutAnnee = Date.UTC(date.getUTCFullYear(), 0, 1);
+  const jour = Math.floor((date - debutAnnee) / 86400000);
+  const declinaison = -23.44 * Math.cos(2 * Math.PI / 365 * (jour + 10));
+  const heureSolaire = date.getUTCHours() + date.getUTCMinutes() / 60 + LONGITUDE / 15;
+  const angleHoraire = 15 * (heureSolaire - 12);
+  const s = Math.sin(LATITUDE * rad) * Math.sin(declinaison * rad) +
+            Math.cos(LATITUDE * rad) * Math.cos(declinaison * rad) * Math.cos(angleHoraire * rad);
+  return Math.asin(s) / rad;
+}
+const estNuit = (date) => hauteurSoleil(date) < -3;
+
+/* Couleurs du ciel (haut, bas) et de l'encre du texte pour chaque situation */
+const AMBIANCES = {
+  "0-jour": { ciel: ["#4E97D8", "#BEDDF5"], encre: "#FFFFFF" },
+  "0-nuit": { ciel: ["#081226", "#22355A"], encre: "#FFFFFF" },
+  "1-jour": { ciel: ["#8EA3B8", "#D5DEE6"], encre: "#18283A" },
+  "1-nuit": { ciel: ["#151F2C", "#364457"], encre: "#FFFFFF" },
+  "2-jour": { ciel: ["#BCC6CE", "#E8ECEF"], encre: "#18283A" },
+  "2-nuit": { ciel: ["#262D35", "#48525C"], encre: "#FFFFFF" },
+  "3-jour": { ciel: ["#55657A", "#98A6B5"], encre: "#FFFFFF" },
+  "3-nuit": { ciel: ["#10161F", "#2B3644"], encre: "#FFFFFF" },
+};
+
+/* Petit générateur pseudo-aléatoire reproductible : les montagnes et les
+ * nuages gardent la même forme d'une actualisation à l'autre. */
+function hasard(graine) {
+  let s = graine >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+class SceneMeteo {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.classe = 1; this.nuit = false; this.temp = 10;
+    this.particules = []; this.nuages = []; this.brumes = []; this.etoiles = [];
+    this.animee = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.redimensionner();
+    this.preparer();                 /* scène neutre en attendant les mesures */
+    new ResizeObserver(() => { this.redimensionner(); this.preparer(); }).observe(canvas);
+  }
+
+  redimensionner() {
+    const r = this.canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.l = Math.max(1, r.width); this.h = Math.max(1, r.height);
+    this.canvas.width = Math.round(this.l * dpr);
+    this.canvas.height = Math.round(this.h * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /* Change la météo affichée ; ne recrée les particules que si elle change */
+  regler(classe, nuit, temp) {
+    const neige = classe === 3 && temp !== null && temp < 1;
+    const cle = `${classe}-${nuit}-${neige}`;
+    this.temp = temp;
+    if (cle === this.cle) return;
+    this.cle = cle; this.classe = classe; this.nuit = nuit; this.neige = neige;
+    this.preparer();
+  }
+
+  preparer() {
+    const { l, h } = this, alea = hasard(7);
+    const ciel = AMBIANCES[`${this.classe}-${this.nuit ? "nuit" : "jour"}`];
+    this.encre = ciel.encre;
+
+    /* Étoiles (nuit claire) */
+    this.etoiles = [];
+    if (this.nuit && this.classe === 0) {
+      for (let i = 0; i < l * h / 2500; i++) {
+        this.etoiles.push({ x: alea() * l, y: alea() * h * 0.7, r: 0.4 + alea() * 1.1, phase: alea() * 6.3 });
+      }
+    }
+
+    /* Nuages : peu par temps clair, beaucoup par temps couvert ou pluvieux.
+     * Chaque nuage est dessiné une fois dans une image hors écran, puis
+     * simplement déplacé : bien plus léger que de le redessiner. */
+    const nbNuages = [2, 7, 3, 9][this.classe];
+    const teinte = this.nuit ? [70, 82, 98] : (this.classe === 3 ? [120, 132, 146] : [255, 255, 255]);
+    this.nuages = [];
+    for (let i = 0; i < nbNuages; i++) {
+      const largeur = (0.25 + alea() * 0.3) * l;
+      this.nuages.push({
+        image: this.dessinerNuage(largeur, teinte, this.classe === 0 ? 0.55 : 0.9, alea),
+        x: alea() * (l + largeur) - largeur, y: (alea() * 0.45 - 0.08) * h,
+        vitesse: 4 + alea() * 10,                  // pixels par seconde
+      });
+    }
+
+    /* Bancs de brouillard */
+    this.brumes = [];
+    if (this.classe === 2) {
+      for (let i = 0; i < 6; i++) {
+        this.brumes.push({ x: alea() * l, y: h * (0.35 + i * 0.11), largeur: l * (0.8 + alea() * 0.6),
+                           hauteur: h * (0.18 + alea() * 0.12), vitesse: 3 + alea() * 6, alpha: 0.35 + alea() * 0.25 });
+      }
+    }
+
+    /* Pluie ou neige */
+    this.particules = [];
+    if (this.classe === 3) {
+      const n = this.neige ? l * h / 900 : l * h / 380;
+      for (let i = 0; i < n; i++) this.particules.push(this.nouvelleGoutte(alea(), alea() * h));
+    }
+
+    /* Montagnes en silhouette, deux plans */
+    this.montagnes = [0.62, 0.74].map((base, plan) => {
+      const pts = [], r = hasard(11 + plan);
+      for (let x = 0; x <= l + 40; x += 40) pts.push([x, h * (base - r() * 0.16 + plan * 0.04)]);
+      return pts;
+    });
+  }
+
+  dessinerNuage(largeur, [r, g, b], opacite, alea) {
+    const hauteur = largeur * 0.45, c = document.createElement("canvas");
+    c.width = Math.ceil(largeur); c.height = Math.ceil(hauteur);
+    const x = c.getContext("2d");
+    for (let i = 0; i < 14; i++) {
+      const cx = largeur * (0.15 + alea() * 0.7), cy = hauteur * (0.45 + alea() * 0.25);
+      const rayon = hauteur * (0.22 + alea() * 0.25);
+      const grad = x.createRadialGradient(cx, cy, 0, cx, cy, rayon);
+      grad.addColorStop(0, `rgba(${r},${g},${b},${opacite})`);
+      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      x.fillStyle = grad;
+      x.beginPath(); x.arc(cx, cy, rayon, 0, 2 * Math.PI); x.fill();
+    }
+    return c;
+  }
+
+  nouvelleGoutte(a, y) {
+    return this.neige
+      ? { x: a * this.l, y, r: 1 + Math.random() * 2.2, v: 20 + Math.random() * 30, phase: Math.random() * 6.3 }
+      : { x: a * (this.l + 100), y, long: 10 + Math.random() * 14, v: 380 + Math.random() * 260 };
+  }
+
+  /* Dessine une image ; dt = temps écoulé depuis la précédente (s) */
+  dessiner(t, dt) {
+    const { ctx, l, h } = this;
+    const amb = AMBIANCES[`${this.classe}-${this.nuit ? "nuit" : "jour"}`];
+
+    /* Ciel */
+    const ciel = ctx.createLinearGradient(0, 0, 0, h);
+    ciel.addColorStop(0, amb.ciel[0]); ciel.addColorStop(1, amb.ciel[1]);
+    ctx.fillStyle = ciel; ctx.fillRect(0, 0, l, h);
+
+    /* Étoiles qui scintillent */
+    for (const e of this.etoiles) {
+      ctx.globalAlpha = 0.45 + 0.45 * Math.sin(t * 1.5 + e.phase);
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    /* Soleil ou lune (visibles par temps clair, voilés par temps nuageux) */
+    if (this.classe <= 1) {
+      const cx = l * 0.6, cy = h * 0.3, R = Math.min(l, h) * 0.11;  /* hors de la vignette « dans 3 h » */
+      ctx.globalAlpha = this.classe === 0 ? 1 : 0.45;
+      if (this.nuit) {
+        const halo = ctx.createRadialGradient(cx, cy, R, cx, cy, R * 3);
+        halo.addColorStop(0, "rgba(220,230,255,0.25)"); halo.addColorStop(1, "rgba(220,230,255,0)");
+        ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx, cy, R * 3, 0, 2 * Math.PI); ctx.fill();
+        ctx.fillStyle = "#EEF2FA"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.fill();
+        ctx.fillStyle = amb.ciel[0];               /* croissant : disque décalé */
+        ctx.beginPath(); ctx.arc(cx + R * 0.45, cy - R * 0.2, R * 0.9, 0, 2 * Math.PI); ctx.fill();
+      } else {
+        const halo = ctx.createRadialGradient(cx, cy, R * 0.8, cx, cy, R * 4);
+        halo.addColorStop(0, "rgba(255,236,170,0.55)"); halo.addColorStop(1, "rgba(255,236,170,0)");
+        ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx, cy, R * 4, 0, 2 * Math.PI); ctx.fill();
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.08);
+        ctx.strokeStyle = "rgba(255,230,150,0.35)"; ctx.lineWidth = 2;
+        for (let i = 0; i < 12; i++) {             /* rayons qui tournent lentement */
+          ctx.rotate(Math.PI / 6);
+          ctx.beginPath(); ctx.moveTo(R * 1.3, 0); ctx.lineTo(R * (1.9 + 0.15 * Math.sin(t * 2 + i)), 0); ctx.stroke();
+        }
+        ctx.restore();
+        ctx.fillStyle = "#FFE08A"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    /* Montagnes */
+    this.montagnes.forEach((pts, plan) => {
+      ctx.fillStyle = this.nuit ? (plan ? "#0B111A" : "#18212D") : (plan ? "rgba(40,58,78,0.55)" : "rgba(60,80,102,0.35)");
+      ctx.beginPath(); ctx.moveTo(0, h);
+      for (const [x, y] of pts) ctx.lineTo(x, y);
+      ctx.lineTo(l, h); ctx.closePath(); ctx.fill();
+    });
+
+    /* Nuages qui dérivent ; ils réapparaissent à gauche en sortant à droite */
+    for (const n of this.nuages) {
+      n.x += n.vitesse * dt;
+      if (n.x > l) n.x = -n.image.width;
+      ctx.drawImage(n.image, n.x, n.y);
+    }
+
+    /* Brouillard : larges nappes horizontales, devant les montagnes */
+    for (const b of this.brumes) {
+      b.x += b.vitesse * dt;
+      if (b.x - b.largeur / 2 > l) b.x = -b.largeur / 2;
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.largeur / 2);
+      const c = this.nuit ? "120,130,140" : "246,248,250";
+      g.addColorStop(0, `rgba(${c},${b.alpha})`); g.addColorStop(1, `rgba(${c},0)`);
+      ctx.save(); ctx.translate(b.x, b.y); ctx.scale(1, b.hauteur / b.largeur); ctx.translate(-b.x, -b.y);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, b.largeur / 2, 0, 2 * Math.PI); ctx.fill();
+      ctx.restore();
+    }
+
+    /* Pluie (traits inclinés par le vent) ou neige (flocons qui ondulent) */
+    if (this.neige) {
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      for (const p of this.particules) {
+        p.y += p.v * dt; p.x += Math.sin(t + p.phase) * 12 * dt;
+        if (p.y > h) Object.assign(p, this.nouvelleGoutte(Math.random(), -5));
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 2 * Math.PI); ctx.fill();
+      }
+    } else if (this.classe === 3) {
+      ctx.strokeStyle = this.nuit ? "rgba(170,190,215,0.45)" : "rgba(225,235,245,0.6)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (const p of this.particules) {
+        p.y += p.v * dt; p.x -= p.v * 0.18 * dt;
+        if (p.y > h) Object.assign(p, this.nouvelleGoutte(Math.random(), -p.long));
+        ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.long * 0.18, p.y - p.long);
+      }
+      ctx.stroke();
+    }
+  }
+}
+
+/* Une seule boucle d'animation pour toutes les scènes de la page, en pause
+ * quand l'onglet n'est pas visible (le navigateur l'arrête de lui-même). */
+const SCENES = [];
+let instantPrecedent = null;
+function boucleScenes(ms) {
+  const dt = instantPrecedent === null ? 0 : Math.min(0.1, (ms - instantPrecedent) / 1000);
+  instantPrecedent = ms;
+  for (const s of SCENES) s.dessiner(ms / 1000, s.animee ? dt : 0);
+  if (SCENES.some((s) => s.animee)) requestAnimationFrame(boucleScenes);
+}
+
+const sceneMaintenant = new SceneMeteo(el("scene"));
+const sceneDans3h = new SceneMeteo(el("scene-h3"));
+SCENES.push(sceneMaintenant, sceneDans3h);
+requestAnimationFrame(boucleScenes);
+
+/* Met le bandeau à jour avec la dernière prédiction de la carte */
+function afficherBandeau(d) {
+  if (!d || d.carte.h0 === null) return;
+  const nuit = estNuit(d.date);
+  const dans3h = new Date(d.date.getTime() + 3 * 3600 * 1000);
+  sceneMaintenant.regler(d.carte.h0, nuit, d.temp);
+  sceneDans3h.regler(d.carte.h3 ?? d.carte.h0, estNuit(dans3h), d.temp);
+  for (const s of SCENES) if (!s.animee) s.dessiner(0, 0);   /* mouvement réduit */
+
+  const neige = d.carte.h0 === 3 && d.temp !== null && d.temp < 1;
+  el("bandeau-texte").style.color = sceneMaintenant.encre;
+  el("b-temp").textContent = `${fmt(d.temp, 1)} °C`;
+  el("b-classe").innerHTML = `${neige ? "Neige" : nomClasse(d.carte.h0)} <span>${fmt(d.carte.c0, 0)} %</span>`;
+  const neige3h = d.carte.h3 === 3 && d.temp !== null && d.temp < 1;
+  el("b-h3").textContent = neige3h ? "Neige" : nomClasse(d.carte.h3);
 }
 
 /* ------------------------------------------------------------------------

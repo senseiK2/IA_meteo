@@ -145,7 +145,10 @@ supprime) :
 
 ## Page de suivi (`web/index.html`)
 
-Page autonome à ouvrir dans un navigateur pendant la démo 6. Elle lit les deux
+Page autonome à ouvrir dans un navigateur pendant la démo 6. En bandeau, une
+scène animée (soleil ou lune, nuages, brouillard, pluie ou neige, jour ou nuit
+selon la position du soleil à Chambéry) montre la prédiction de la carte, avec
+une vignette pour la prévision à +3 h. Elle lit les deux
 canaux ThingSpeak toutes les 20 s et affiche, pour chaque mesure, la
 prédiction de la carte et celle du cloud, leur accord, les temps de réponse sur
 une échelle logarithmique, les mesures et l'historique.
