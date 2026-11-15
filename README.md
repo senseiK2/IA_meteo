@@ -67,7 +67,14 @@ Dans `Appli/Core/Src/app_freertos.c`, une seule ligne à changer :
 | `3` | Capteurs + réseau : DHCP, ping google.com toutes les 10 s | + bleu = communication réseau |
 | `4` | Capteurs + envoi des mesures sur ThingSpeak toutes les 20 s (TP3.2) | + bleu = communication réseau |
 | `5` | Capteurs + réseau de neurones exécuté sur la carte (TP3.3) : auto-test et temps de calcul | rouge / vert |
-| `6` | Démo finale (TP3.3c) : chaque mesure est classée sur la carte **et** dans le cloud, réponses et temps comparés | + bleu = communication réseau |
+| `6` | Démo finale (TP3.3c) : prédiction sur la carte toutes les 20 s (fonctionne sans réseau) ; mesures et prédictions envoyées sur ThingSpeak et comparées à celles du cloud | météo prédite (h0) : vert = Clair, vert + bleu = Nuageux, rouge = Brouillard, bleu = Précipitations |
+
+**Démo 6 sans réseau.** La tâche `TacheIA` prédit indépendamment de
+`TacheReseau`. L'heure (4 des 8 entrées du modèle) vient de l'horloge
+logicielle `horloge.c` : date de compilation au démarrage (approximative),
+puis heure exacte dès qu'un serveur répond (en-tête HTTP `Date:`). La date de
+compilation est celle de la dernière compilation de `horloge.c` : faire
+*Project → Clean* avant de compiler pour la mettre à jour.
 
 **Démos 4 et 6 : clés ThingSpeak.** Copier `Appli/Core/Inc/secrets_exemple.h` en
 `Appli/Core/Inc/secrets.h` et y mettre la *Write API Key* du canal.

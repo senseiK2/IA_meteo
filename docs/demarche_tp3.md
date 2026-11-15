@@ -413,9 +413,28 @@ jusqu'à 800 MHz) et caches désactivés.
 
 ### Comparaison carte / cloud sur les mêmes mesures (démo 6, question 3.3c)
 
-Pour chaque mesure, la carte calcule sa propre prédiction (heure UTC lue dans
-l'en-tête HTTP `Date:` de la réponse de ThingSpeak) puis attend celle du cloud
-(React → MATLAB → TalkBack) et compare les deux.
+Trois tâches FreeRTOS indépendantes :
+
+| Tâche | Rôle | Période |
+|---|---|---|
+| `TacheCapteurs` | lit SHT40, LPS22DF, STTS22H ; dépose la mesure (boîte aux lettres protégée par mutex) | 5 s |
+| `TacheIA` | 8 entrées → modèles h0 et h3 ; LEDs = classe h0 ; dépose la prédiction et la mesure utilisée | 20 s |
+| `TacheReseau` | envoie mesure et prédiction (field1–8), attend la réponse du cloud (React → MATLAB → TalkBack), compare | 20 s |
+
+Le cloud reçoit la mesure exacte utilisée par la carte : les deux prédictions
+portent sur les mêmes entrées. Sans réseau, `TacheIA` continue de prédire et
+d'afficher la météo sur les LEDs ; seule la comparaison s'arrête.
+
+L'heure UTC vient de l'horloge logicielle (`horloge.c`) : au démarrage, la date
+de compilation du firmware (`__DATE__`, `__TIME__`, heure de Paris ramenée en
+UTC, une heure d'erreur au plus en été) ; ensuite, l'heure de l'en-tête HTTP
+`Date:` de chaque réponse de ThingSpeak. Entre deux réglages elle avance avec le
+compteur de millisecondes de FreeRTOS. Une heure d'écart change peu les
+entrées `heure_sin/cos`, et la date de compilation donne la bonne saison.
+
+Les résultats ci-dessous ont été obtenus avec la version précédente du
+firmware, où la prédiction de la carte était calculée dans `TacheReseau` juste
+avant l'envoi : même modèle, mêmes entrées, même comparaison.
 
 Essai du 14/11/2026, environ 17 minutes de fonctionnement :
 

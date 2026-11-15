@@ -16,9 +16,11 @@
   *          CARTE (TP3.3), code généré par X-CUBE-AI : auto-test des modèles
   *          h0 (maintenant) et h3 (dans 3 h) sur les vecteurs de test de
   *          Python, et temps de calcul.
-  *     6 -> démo finale cloud / edge (TP3.3c) : comme la démo 4, mais la
-  *          carte calcule AUSSI ses propres prédictions (h0 et h3) sur la
-  *          même mesure, puis compare réponses et temps à ceux du cloud.
+  *     6 -> démo finale cloud / edge (TP3.3c), trois tâches indépendantes :
+  *          TacheCapteurs mesure ; TacheIA prédit SUR LA CARTE toutes les
+  *          20 s et affiche la météo prédite sur les LEDs ; TacheReseau
+  *          envoie mesures et prédictions sur ThingSpeak et les compare à
+  *          celles du cloud. Sans réseau, TacheIA continue seule.
   *
   *   Les deux tâches se partagent les dernières mesures par une "boîte aux
   *   lettres" protégée par un mutex (mesures_publier / mesures_lire).
@@ -55,6 +57,7 @@
 #include "console.h"
 #include "thingspeak.h"
 #include "meteo_ia.h"
+#include "horloge.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -77,6 +80,7 @@
                                       (compte gratuit : 15 s minimum)            */
 #define TB_SCRUTATION_MS   2000U   /* TalkBack : on regarde la file toutes les 2 s */
 #define TB_ATTENTE_MAX_MS  30000U  /* ... pendant 30 s au plus après l'envoi      */
+#define IA_PERIODE_MS      20000U  /* démo 6 : une prédiction sur la carte / 20 s  */
 
 #if (DEMO_PARTIE < 1) || (DEMO_PARTIE > 6)
 #error "DEMO_PARTIE doit valoir 1 a 6"
@@ -152,6 +156,36 @@ static sensors_data_t s_derniere_mesure;
 static bool           s_mesure_dispo = false;
 static osMutexId_t    s_mesures_mutex = NULL;
 
+/* Deuxième boîte aux lettres (démo 6) : la dernière prédiction de la carte.
+ * TacheIA la remplit, TacheReseau l'envoie sur ThingSpeak et la compare à
+ * la réponse du cloud. Elle contient aussi la mesure utilisée, pour que le
+ * cloud travaille exactement sur les mêmes valeurs que la carte. */
+typedef struct
+{
+  uint32_t       numero;                          /* 1, 2, 3... à chaque prédiction */
+  sensors_data_t mesure;                          /* mesure utilisée                */
+  uint32_t       epoch;                           /* heure UTC utilisée             */
+  bool           heure_exacte;                    /* false : date de compilation    */
+  int            classe[METEO_IA_NB_MODELES];     /* 0..3, ou -1 si erreur          */
+  float          confiance[METEO_IA_NB_MODELES];  /* en %                           */
+  uint32_t       us[METEO_IA_NB_MODELES];         /* temps de calcul (µs)           */
+} prediction_t;
+
+static prediction_t s_prediction;
+static bool         s_prediction_dispo = false;
+static osMutexId_t  s_prediction_mutex = NULL;
+
+/* Démo 6 : les LEDs affichent la météo prédite (TacheIA). Les tâches qui
+ * les utilisaient pour leur état (capteurs, réseau) ne doivent plus y
+ * toucher : ces macros ne font alors rien. Démos 1 à 5 : LEDs d'état du TP2. */
+#if (DEMO_PARTIE == 6)
+#define LED_ETAT_ON(id)    ((void)(id))
+#define LED_ETAT_OFF(id)   ((void)(id))
+#else
+#define LED_ETAT_ON(id)    led_on(id)
+#define LED_ETAT_OFF(id)   led_off(id)
+#endif
+
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -169,7 +203,9 @@ void TacheReseau(void *argument);
 void TacheIA(void *argument);
 static void log_etat(const char *etat);
 static void mesures_publier(const sensors_data_t *m);
-__attribute__((unused)) static bool mesures_lire(sensors_data_t *m);  /* démo 4 seulement */
+__attribute__((unused)) static bool mesures_lire(sensors_data_t *m);  /* démos 4 et 6 */
+__attribute__((unused)) static void prediction_publier(const prediction_t *p);  /* démo 6 */
+__attribute__((unused)) static bool prediction_lire(prediction_t *p);           /* démo 6 */
 /* USER CODE END FunctionPrototypes */
 
 /**
@@ -185,8 +221,11 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_MUTEX */
   /* Mutex de la console : plusieurs tâches font des printf (console.c) */
   console_init();
-  /* Mutex de la boîte aux lettres des mesures */
-  s_mesures_mutex = osMutexNew(NULL);/* USER CODE END RTOS_MUTEX */
+  /* Mutex des boîtes aux lettres des mesures et des prédictions */
+  s_mesures_mutex = osMutexNew(NULL);
+  s_prediction_mutex = osMutexNew(NULL);
+  /* Horloge logicielle : date de compilation en attendant un serveur */
+  horloge_init();/* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -219,7 +258,7 @@ void MX_FREERTOS_Init(void) {
   TacheReseauHandle = osThreadNew(TacheReseau, NULL, &TacheReseau_attributes);
   ok = ok && (TacheReseauHandle != NULL);
 #endif
-#if (DEMO_PARTIE == 5)
+#if (DEMO_PARTIE == 5) || (DEMO_PARTIE == 6)
   TacheIAHandle = osThreadNew(TacheIA, NULL, &TacheIA_attributes);
   ok = ok && (TacheIAHandle != NULL);
 #endif
@@ -233,6 +272,7 @@ void MX_FREERTOS_Init(void) {
   printf("  Demo : TP3.3, reseau de neurones sur la carte\r\n");
 #elif (DEMO_PARTIE == 6)
   printf("  Demo : TP3.3c, comparaison IA sur la carte / IA dans le cloud\r\n");
+  printf("  LEDs : vert = Clair, vert + bleu = Nuageux, rouge = Brouillard, bleu = Precipitations\r\n");
 #else
   printf("  Demo : partie %d du TP2\r\n", DEMO_PARTIE);
 #endif/* USER CODE END RTOS_THREADS */
@@ -299,6 +339,29 @@ static bool mesures_lire(sensors_data_t *m)
   return dispo;
 }
 
+/* Dépose une copie de la dernière prédiction de la carte */
+static void prediction_publier(const prediction_t *p)
+{
+  osMutexAcquire(s_prediction_mutex, osWaitForever);
+  s_prediction = *p;
+  s_prediction_dispo = true;
+  osMutexRelease(s_prediction_mutex);
+}
+
+/* Récupère une copie de la dernière prédiction. false s'il n'y en a pas. */
+static bool prediction_lire(prediction_t *p)
+{
+  bool dispo;
+  osMutexAcquire(s_prediction_mutex, osWaitForever);
+  dispo = s_prediction_dispo;
+  if (dispo)
+  {
+    *p = s_prediction;
+  }
+  osMutexRelease(s_prediction_mutex);
+  return dispo;
+}
+
 /* ========================================================================= */
 /* Partie 1 : LEDs et chenillard                                             */
 /* ========================================================================= */
@@ -341,8 +404,8 @@ void TacheCapteurs(void *argument)
   (void)argument;   /* paramètre non utilisé : évite un warning */
 
   /* --- Initialisation : exécutée UNE fois, au démarrage de la tâche --- */
-  led_off(LED_ID_GREEN);
-  led_on(LED_ID_RED);                   /* occupé */
+  LED_ETAT_OFF(LED_ID_GREEN);
+  LED_ETAT_ON(LED_ID_RED);                   /* occupé */
 
   console_lock();                       /* tout le bloc d'init d'un seul tenant */
   printf("[%8lu ms] <scan du bus I2C>\r\n", (unsigned long)osKernelGetTickCount());
@@ -352,18 +415,18 @@ void TacheCapteurs(void *argument)
   printf("  %d/3 capteurs prets\r\n", nb);
   console_unlock();
 
-  led_off(LED_ID_RED);
-  led_on(LED_ID_GREEN);                 /* disponible */
+  LED_ETAT_OFF(LED_ID_RED);
+  LED_ETAT_ON(LED_ID_GREEN);                 /* disponible */
 
   /* --- Boucle infinie : une tâche ne doit JAMAIS se terminer --- */
   for (;;)
   {
     osDelay(SENSOR_PERIOD_MS - LED_BUSY_MIN_MS);   /* VERT : en attente */
 
-    led_off(LED_ID_GREEN);
-    led_on(LED_ID_RED);                 /* ROUGE : lecture en cours */
+    LED_ETAT_OFF(LED_ID_GREEN);
+    LED_ETAT_ON(LED_ID_RED);                 /* ROUGE : lecture en cours */
     sensors_read(&s_data);
-    mesures_publier(&s_data);           /* pour TacheReseau (ThingSpeak) */
+    mesures_publier(&s_data);           /* pour TacheReseau et TacheIA */
 
     console_lock();                     /* le log et les 3 lignes de mesures ensemble */
     printf("[%8lu ms] <Lecture Interface Capteurs>\r\n", (unsigned long)osKernelGetTickCount());
@@ -374,8 +437,8 @@ void TacheCapteurs(void *argument)
      * 300 ms pour qu'elle soit visible. On DORT (osDelay), on n'attend pas
      * activement : les autres tâches continuent de tourner. */
     osDelay(LED_BUSY_MIN_MS);
-    led_off(LED_ID_RED);
-    led_on(LED_ID_GREEN);               /* VERT : disponible */
+    LED_ETAT_OFF(LED_ID_RED);
+    LED_ETAT_ON(LED_ID_GREEN);               /* VERT : disponible */
   }
 }
 
@@ -408,14 +471,6 @@ static void reseau_action(void)
 
 #elif (DEMO_PARTIE == 4) || (DEMO_PARTIE == 6)
 #if (DEMO_PARTIE == 6)
-/* Écrit v avec une décimale ("1012.3"), sans printf flottant */
-static void fx1(float v, char *buf, size_t len)
-{
-  int32_t d = (int32_t)(v * 10.0f + ((v >= 0.0f) ? 0.5f : -0.5f));
-  snprintf(buf, len, "%s%ld.%01ld", (d < 0) ? "-" : "",
-           (long)(((d < 0) ? -d : d) / 10), (long)(((d < 0) ? -d : d) % 10));
-}
-
 /* Extrait d'une réponse du cloud la classe prédite par un modèle :
  * "h0=Nuageux,64;h3=Precipitations,55", "h3" -> "Precipitations" */
 static bool classe_cloud(const char *commande, const char *modele,
@@ -478,57 +533,17 @@ static void reseau_action(void)
   }
 
 #if (DEMO_PARTIE == 6)
-  /* 2. Prédiction SUR LA CARTE, avec la mesure qu'on va envoyer. L'heure
-   *    vient de l'en-tête "Date:" des réponses précédentes de ThingSpeak
-   *    (au tout premier cycle elle est encore inconnue : pas de prédiction,
-   *    on envoie seulement les mesures). */
-  float x[METEO_IA_NB_ENTREES];
-  float proba[METEO_IA_NB_MODELES][METEO_IA_NB_CLASSES];
-  uint32_t epoch = 0U;
-  uint32_t cycles[METEO_IA_NB_MODELES] = { 0U };
-  int k_carte[METEO_IA_NB_MODELES] = { -1, -1 };
-  bool heure_ok = thingspeak_heure_utc(&epoch);
-  if (heure_ok)
+  /* 2. Dernière prédiction de la carte, calculée par TacheIA. On envoie la
+   *    mesure qu'elle a utilisée : le cloud travaille ainsi sur exactement
+   *    les mêmes valeurs que la carte. */
+  prediction_t p;
+  bool avec_prediction = prediction_lire(&p) && (p.classe[METEO_IA_H0] >= 0)
+                         && (p.classe[METEO_IA_H3] >= 0);
+  if (avec_prediction)
   {
-    meteo_ia_calculer_entrees(m.temp_hum_c, m.humidity_rh, m.pressure_hpa, epoch, x);
-    for (int md = 0; md < METEO_IA_NB_MODELES; md++)
-    {
-      k_carte[md] = meteo_ia_predire((meteo_ia_modele_t)md, x, proba[md], &cycles[md]);
-    }
+    m = p.mesure;
   }
-
-  console_lock();
-  if (heure_ok)
-  {
-    char pmer[16], ecart[16];
-    fx1(x[METEO_IA_E_PRES], pmer, sizeof(pmer));
-    fx1(x[METEO_IA_E_ECART_ROSEE], ecart, sizeof(ecart));
-    printf("  Entrees carte    : P mer %s hPa, ecart rosee %s, heure UTC %02lu:%02lu\r\n",
-           pmer, ecart, (unsigned long)((epoch % 86400U) / 3600U),
-           (unsigned long)((epoch % 3600U) / 60U));
-    for (int md = 0; md < METEO_IA_NB_MODELES; md++)
-    {
-      if (k_carte[md] >= 0)
-      {
-        printf("  Prediction carte : %s=%s (%lu %%) en %lu us\r\n",
-               meteo_ia_nom((meteo_ia_modele_t)md), meteo_ia_classe(k_carte[md]),
-               (unsigned long)(proba[md][k_carte[md]] * 100.0f + 0.5f),
-               (unsigned long)meteo_ia_cycles_en_us(cycles[md]));
-      }
-      else
-      {
-        printf("  Prediction carte : %s, erreur du reseau\r\n",
-               meteo_ia_nom((meteo_ia_modele_t)md));
-      }
-    }
-  }
-  else
-  {
-    printf("  Prediction carte : impossible (heure inconnue)\r\n");
-  }
-  console_unlock();
 #endif
-
 
   /* 3. Envoi des mesures. Température du SHT40 : même capteur que
    *    l'humidité, donc point de rosée cohérent. Pression brute : MATLAB la
@@ -543,13 +558,13 @@ static void reseau_action(void)
    *   field8          : temps d'inférence du modèle h0 sur la carte (µs) */
   float champs[TS_NB_CHAMPS] = { m.temp_hum_c, m.humidity_rh, m.pressure_hpa };
   uint8_t masque = 0x07U;                         /* field1..3 : les mesures */
-  if ((k_carte[METEO_IA_H0] >= 0) && (k_carte[METEO_IA_H3] >= 0))
+  if (avec_prediction)
   {
-    champs[3] = (float)k_carte[METEO_IA_H0];
-    champs[4] = proba[METEO_IA_H0][k_carte[METEO_IA_H0]] * 100.0f;
-    champs[5] = (float)k_carte[METEO_IA_H3];
-    champs[6] = proba[METEO_IA_H3][k_carte[METEO_IA_H3]] * 100.0f;
-    champs[7] = (float)meteo_ia_cycles_en_us(cycles[METEO_IA_H0]);
+    champs[3] = (float)p.classe[METEO_IA_H0];
+    champs[4] = p.confiance[METEO_IA_H0];
+    champs[5] = (float)p.classe[METEO_IA_H3];
+    champs[6] = p.confiance[METEO_IA_H3];
+    champs[7] = (float)p.us[METEO_IA_H0];
     masque = 0xFFU;                               /* field1..8 */
   }
   ts_resultat_t r = thingspeak_envoyer_champs(THINGSPEAK_WRITE_KEY, champs, masque, &numero);
@@ -596,14 +611,13 @@ static void reseau_action(void)
       {
         char cl_cloud[24];
         const char *nom = meteo_ia_nom((meteo_ia_modele_t)md);
-        if ((k_carte[md] >= 0) && classe_cloud(commande, nom, cl_cloud, sizeof(cl_cloud)))
+        if (avec_prediction && classe_cloud(commande, nom, cl_cloud, sizeof(cl_cloud)))
         {
-          bool accord = (strcmp(cl_cloud, meteo_ia_classe(k_carte[md])) == 0);
+          bool accord = (strcmp(cl_cloud, meteo_ia_classe(p.classe[md])) == 0);
           s_nb_comparaisons[md]++;
           s_nb_accords[md] += accord ? 1U : 0U;
           printf("  => %s carte : %s en %lu us | cloud : %s en %lu ms | %s (%lu/%lu)\r\n",
-                 nom, meteo_ia_classe(k_carte[md]),
-                 (unsigned long)meteo_ia_cycles_en_us(cycles[md]),
+                 nom, meteo_ia_classe(p.classe[md]), (unsigned long)p.us[md],
                  cl_cloud, (unsigned long)latence,
                  accord ? "ACCORD" : "DESACCORD",
                  (unsigned long)s_nb_accords[md], (unsigned long)s_nb_comparaisons[md]);
@@ -633,20 +647,6 @@ void TacheReseau(void *argument)
 {
   (void)argument;
 
-#if (DEMO_PARTIE == 6)
-  /* Le réseau de neurones est prêt avant le réseau Ethernet : on vérifie
-   * d'abord qu'il donne les mêmes réponses que Python. */
-  if (meteo_ia_init())
-  {
-    meteo_ia_autotest(METEO_IA_H0);
-    meteo_ia_autotest(METEO_IA_H3);
-  }
-  else
-  {
-    log_etat("IA : initialisation des reseaux impossible");
-  }
-#endif
-
   reseau_init();                       /* LwIP + Ethernet + DHCP (app_ethernet.c) */
 
   if (!reseau_attendre_ip(30000))      /* 30 s pour obtenir une IP */
@@ -658,10 +658,10 @@ void TacheReseau(void *argument)
   {
     if (reseau_est_pret())
     {
-      led_on(LED_ID_BLUE);                         /* BLEU : communication réseau */
+      LED_ETAT_ON(LED_ID_BLUE);                    /* BLEU : communication réseau */
       log_etat("Communication Reseau");
       reseau_action();
-      led_off(LED_ID_BLUE);
+      LED_ETAT_OFF(LED_ID_BLUE);
     }
     else
     {
@@ -676,10 +676,87 @@ void TacheReseau(void *argument)
 /* ========================================================================= */
 /* TP3.3 : réseau de neurones sur la carte                                    */
 /* ========================================================================= */
-#if (DEMO_PARTIE == 5)
+#if (DEMO_PARTIE == 6)
+/* Écrit v avec une décimale ("1012.3"), sans printf flottant */
+static void fx1(float v, char *buf, size_t len)
+{
+  int32_t d = (int32_t)(v * 10.0f + ((v >= 0.0f) ? 0.5f : -0.5f));
+  snprintf(buf, len, "%s%ld.%01ld", (d < 0) ? "-" : "",
+           (long)(((d < 0) ? -d : d) / 10), (long)(((d < 0) ? -d : d) % 10));
+}
+
+/* LEDs météo : la prédiction "maintenant" (h0) de la carte.
+ *   Clair = vert, Nuageux = vert + bleu, Brouillard = rouge,
+ *   Précipitations = bleu. Toutes éteintes si pas de prédiction. */
+static void leds_meteo(int classe)
+{
+  led_all_off();
+  switch (classe)
+  {
+    case 0: led_on(LED_ID_GREEN);                       break;
+    case 1: led_on(LED_ID_GREEN); led_on(LED_ID_BLUE);  break;
+    case 2: led_on(LED_ID_RED);                         break;
+    case 3: led_on(LED_ID_BLUE);                        break;
+    default:                                            break;
+  }
+}
+
+/* Une prédiction complète sur la carte : mesure -> 8 entrées -> h0 et h3.
+ * Renvoie false s'il n'y a pas encore de mesure valide. */
+static bool predire_sur_la_carte(void)
+{
+  static uint32_t numero = 0U;
+  prediction_t p;
+  float x[METEO_IA_NB_ENTREES];
+
+  if (!mesures_lire(&p.mesure) || !p.mesure.humidity_ok || !p.mesure.pressure_ok)
+  {
+    return false;
+  }
+
+  /* Heure : exacte si un serveur a répondu, sinon date de compilation */
+  p.heure_exacte = horloge_lire(&p.epoch);
+  meteo_ia_calculer_entrees(p.mesure.temp_hum_c, p.mesure.humidity_rh,
+                            p.mesure.pressure_hpa, p.epoch, x);
+
+  for (int md = 0; md < METEO_IA_NB_MODELES; md++)
+  {
+    float proba[METEO_IA_NB_CLASSES];
+    uint32_t cycles = 0U;
+    p.classe[md] = meteo_ia_predire((meteo_ia_modele_t)md, x, proba, &cycles);
+    p.confiance[md] = (p.classe[md] >= 0) ? proba[p.classe[md]] * 100.0f : 0.0f;
+    p.us[md] = meteo_ia_cycles_en_us(cycles);
+  }
+  p.numero = ++numero;
+
+  leds_meteo(p.classe[METEO_IA_H0]);       /* la météo prédite, sur la carte */
+  prediction_publier(&p);                  /* pour TacheReseau               */
+
+  char pmer[16], ecart[16];
+  fx1(x[METEO_IA_E_PRES], pmer, sizeof(pmer));
+  fx1(x[METEO_IA_E_ECART_ROSEE], ecart, sizeof(ecart));
+  console_lock();
+  printf("[%8lu ms] <IA carte n%lu> heure UTC %02lu:%02lu (%s), P mer %s hPa, ecart rosee %s\r\n",
+         (unsigned long)osKernelGetTickCount(), (unsigned long)p.numero,
+         (unsigned long)((p.epoch % 86400U) / 3600U), (unsigned long)((p.epoch % 3600U) / 60U),
+         p.heure_exacte ? "serveur" : "approx., date de compilation", pmer, ecart);
+  for (int md = 0; md < METEO_IA_NB_MODELES; md++)
+  {
+    printf("  Prediction carte : %s=%s (%lu %%) en %lu us\r\n",
+           meteo_ia_nom((meteo_ia_modele_t)md), meteo_ia_classe(p.classe[md]),
+           (unsigned long)(p.confiance[md] + 0.5f), (unsigned long)p.us[md]);
+  }
+  console_unlock();
+  return true;
+}
+#endif
+
+#if (DEMO_PARTIE == 5) || (DEMO_PARTIE == 6)
 /**
-  * @brief  Initialise le réseau généré par X-CUBE-AI puis vérifie qu'il
-  *         donne les mêmes réponses que Python sur les vecteurs de test.
+  * @brief  Initialise les réseaux générés par X-CUBE-AI et vérifie qu'ils
+  *         donnent les mêmes réponses que Python (vecteurs de test).
+  *         Démo 6 : prédit ensuite toutes les 20 s, que le réseau Ethernet
+  *         fonctionne ou non, et affiche la météo prédite sur les LEDs.
   */
 void TacheIA(void *argument)
 {
@@ -699,7 +776,12 @@ void TacheIA(void *argument)
 
   for (;;)
   {
+#if (DEMO_PARTIE == 6)
+    /* Pas encore de mesure (capteurs en démarrage) : on réessaie dans 1 s */
+    osDelay(predire_sur_la_carte() ? IA_PERIODE_MS : 1000U);
+#else
     osDelay(1000);
+#endif
   }
 }
 #endif

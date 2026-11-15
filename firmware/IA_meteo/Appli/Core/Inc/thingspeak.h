@@ -64,13 +64,6 @@ ts_resultat_t thingspeak_envoyer_champs(const char *cle_ecriture,
 ts_resultat_t thingspeak_talkback_lire(const char *id, const char *cle,
                                        char *commande, size_t taille);
 
-/**
-  * Heure actuelle en temps UTC (secondes depuis le 01/01/1970), déduite de
-  * l'en-tête "Date:" de la dernière réponse de ThingSpeak.
-  * @return false tant qu'aucune réponse n'a été reçue
-  */
-bool thingspeak_heure_utc(uint32_t *epoch);
-
 /* Texte lisible pour un résultat (pour les logs) */
 const char *thingspeak_texte(ts_resultat_t r);
 
