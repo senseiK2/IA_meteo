@@ -140,6 +140,10 @@ set STEDGEAI=%USERPROFILE%\STM32Cube\Repository\Packs\STMicroelectronics\X-CUBE-
 "%STEDGEAI%" generate -m ml\models\export\modele_meteo_h3.onnx --target stm32n6 --name meteo_h3 -o st_ai_output\h3
 ```
 
+Analyse des modèles int8 pour le NPU Neural-ART (rapport seulement, le
+firmware n'est pas modifié) : `powershell -ExecutionPolicy Bypass -File
+ml\analyse_npu.ps1`, depuis la racine du dépôt.
+
 | Élément | Emplacement |
 |---|---|
 | Réseaux générés (`meteo_h0*.c/.h`, `meteo_h3*.c/.h`, rapports de génération) | `Appli/X-CUBE-AI/App` |
